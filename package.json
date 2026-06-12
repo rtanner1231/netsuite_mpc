@@ -1,0 +1,20 @@
+{
+  "name": "netsuite_mcp",
+  "version": "1.0.0",
+  "description": "NetSuite Schema Provider MCP Server",
+  "main": "build/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.1",
+    "oauth-1.0a": "^2.2.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

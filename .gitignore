@@ -1,0 +1,38 @@
+# Dependency directories
+node_modules/
+
+# TypeScript build output (as configured in tsconfig.json)
+build/
+dist/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables & secrets
+# (Even though your config lives in ~/.config, it's good practice just in case you test locally)
+.env
+.env.*
+env.json
+config.json
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
