@@ -1,0 +1,478 @@
+<html>
+  <head>
+    <title>OpenCode MCP Data</title>
+    <style>
+      /* --- General Layout --- */
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: "Arial", sans-serif;
+        background-color: #f2f2f2;
+      }
+
+      .container {
+        width: 80%;
+        margin: 0 auto;
+        text-align: center;
+        padding-top: 20px;
+      }
+
+      /* --- Typography --- */
+      .heading {
+        font-size: 38px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        color: #333;
+      }
+
+      label {
+        font-size: 20px;
+        display: block;
+        margin-bottom: 10px;
+        font-weight: bold;
+      }
+
+      #status {
+        font-size: 18px;
+        margin: 20px auto;
+        min-height: 24px; /* Prevent layout shift */
+        color: #555;
+      }
+
+      /* --- Components --- */
+      #myProgress {
+        width: 100%;
+        background-color: #ddd;
+        margin: 20px auto;
+        border-radius: 5px;
+        overflow: hidden;
+      }
+
+      #myBar {
+        width: 0%;
+        height: 30px;
+        background-color: #04aa6d;
+        text-align: center;
+        line-height: 30px;
+        color: white;
+        transition: width 0.3s ease;
+      }
+
+      textarea {
+        width: 100%;
+        padding: 10px;
+        height: 400px;
+        margin-bottom: 20px;
+        resize: none;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        box-sizing: border-box;
+        font-family: monospace;
+      }
+
+      /* --- Buttons --- */
+      button {
+        height: 40px;
+        border: none;
+        border-radius: 5px;
+        font-size: 16px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+
+      .run-button {
+        background-color: green;
+        color: white;
+        width: 100px;
+        margin: 0 auto;
+        display: block;
+      }
+      .run-button:hover {
+        background-color: darkgreen;
+      }
+
+      .action-buttons {
+        display: flex;
+        justify-content: center;
+        gap: 15px;
+        margin-bottom: 40px;
+      }
+
+      .copy-button {
+        background-color: #007bff;
+        color: white;
+        width: 160px;
+      }
+      .copy-button:hover:not(:disabled) {
+        background-color: #0056b3;
+      }
+      .copy-button:disabled {
+        background-color: #ccc;
+        color: #999;
+        cursor: not-allowed;
+      }
+
+      .download-button {
+        background-color: #6f42c1;
+        color: white;
+        width: 160px;
+      }
+      .download-button:hover:not(:disabled) {
+        background-color: #59339d;
+      }
+      .download-button:disabled {
+        background-color: #ccc;
+        color: #999;
+        cursor: not-allowed;
+      }
+    </style>
+
+    <script language="javascript">
+      /**
+       * Main Class to handle SuiteQL Metadata Loading
+       */
+      class SuiteQLMetadataLoader {
+        constructor() {
+          this.endpoint = "/app/recordscatalog/rcendpoint.nl";
+          this.state = {
+            currentIterTotal: 0,
+            currentIterNum: 0,
+            currentStage: "",
+          };
+          
+          // DOM Elements cache
+          this.ui = {
+            bar: null,
+            status: null,
+            resultArea: null,
+            copyBtn: null,
+            downloadBtn: null,
+          };
+        }
+
+        init() {
+          this.ui.bar = document.getElementById("myBar");
+          this.ui.status = document.getElementById("status");
+          this.ui.resultArea = document.getElementById("result_area");
+          this.ui.copyBtn = document.getElementById("copyBtn");
+          this.ui.downloadBtn = document.getElementById("downloadBtn");
+        }
+
+        // --- UI Methods ---
+
+        updateUI() {
+          const { currentIterTotal, currentIterNum, currentStage } = this.state;
+          const percentage = currentIterTotal === 0 
+            ? 0 
+            : Math.round((currentIterNum / currentIterTotal) * 100);
+          
+          const percentString = `${percentage}%`;
+          
+          this.ui.bar.style.width = percentString;
+          this.ui.bar.innerHTML = percentString;
+          this.ui.status.innerHTML = currentStage;
+        }
+
+        setStage(stageName, totalItems) {
+          this.state.currentStage = stageName;
+          this.state.currentIterTotal = totalItems;
+          this.state.currentIterNum = 0;
+          this.updateUI();
+        }
+
+        incrementProgress() {
+          this.state.currentIterNum++;
+          this.updateUI();
+        }
+
+        sleep(ms) {
+          return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // --- API / Network Methods ---
+
+        async runRequest(action, data) {
+          try {
+            const url = `${this.endpoint}?action=${action}&data=${data}`;
+            const response = await fetch(url);
+            
+            if (!response.ok) return { success: false };
+            
+            const result = await response.json();
+            return { success: true, result };
+          } catch (e) {
+            console.error("Request Failed:", e);
+            return { success: false };
+          }
+        }
+
+        getRectype(urlString) {
+            try {
+                const url = new URL(urlString, "http://dummy");
+                const rectype = url.searchParams.get("rectype");
+                return rectype !== null ? rectype : "";
+            } catch (e) {
+                console.error("Invalid URL provided:", e);
+                return "";
+            }
+        }   
+
+        /**
+         * Helper to fetch the internal numerical ID for a table/record.
+         */
+        async getRecordId(rec){
+            try{
+                const requestUrl=`/app/common/scripting/ClientScriptHandler.nl?script=&deploy=&jrid=1&jrmethod=remoteObject.nlapiResolveURL&jrparams=["RECORD"%2C"${rec}"%2C1%2Cnull]`
+                const result=await fetch(requestUrl);
+                const body=await result.json();
+
+                if(!body.result){
+                   return '';
+                }
+                const resultUrl=body.result;
+                return this.getRectype(resultUrl);
+            } catch(e) {
+                  return '';
+            }
+        }
+
+        async loadRecordTypes() {
+          const action = "getRecordTypes";
+          const data = encodeURI(JSON.stringify({ structureType: "FLAT" }));
+          const { success, result } = await this.runRequest(action, data);
+
+          if (!success) return [];
+
+          return result.data.map((t) => ({
+            id: t.id.toLowerCase(),
+            label: t.label,
+          }));
+        }
+
+        async loadTableDetail(tableId) {
+          const action = "getRecordTypeDetail";
+          const data = encodeURI(
+            JSON.stringify({ scriptId: tableId, detailType: "ss_anal" })
+          );
+          const { success, result } = await this.runRequest(action, data);
+
+          if (!success) return { success: false };
+
+          const fieldsData = result.data;
+          const discoveredJoins = [];
+          
+          // Process Fields naturally grabbing their inherent joins/joinPairs
+          const fields = (fieldsData.fields || []).map((f) => {
+            const fieldObj = {
+              id: f.id.toLowerCase(),
+              label: f.label,
+            };
+
+            if (f.joins && f.joins.length > 0) {
+              fieldObj.joins = f.joins.map((join) => {
+                const target = join.sourceTargetType;
+
+                if (target && target.id) {
+                    discoveredJoins.push({
+                        id: target.id.toLowerCase(),
+                        label: target.label
+                    });
+                }
+
+                return {
+                  id: target ? target.id.toLowerCase() : "",
+                  label: target ? target.label : "",
+                  joinPairs: target && target.joinPairs ? target.joinPairs.map(jp => ({
+                      id: jp.id,
+                      label: jp.label
+                  })) : []
+                };
+              });
+            }
+
+            return fieldObj;
+          });
+
+          this.incrementProgress();
+
+          return {
+            tId: tableId,
+            success: true,
+            fields,
+            joins: discoveredJoins,
+          };
+        }
+
+        // --- Core Logic ---
+
+        async processBatch(tablesToProcess, processedTableSet) {
+          const tableFields = {};
+          const newJoinedTables = [];
+          const results = [];
+          
+          // Throttling configuration
+          const CHUNK_SIZE = 10; // Max concurrent requests
+          const DELAY_MS = 500;  // Pause between chunks in milliseconds
+
+          // Process the array in chunks rather than all at once
+          for (let i = 0; i < tablesToProcess.length; i += CHUNK_SIZE) {
+            const chunk = tablesToProcess.slice(i, i + CHUNK_SIZE);
+            const promises = chunk.map((t) => this.loadTableDetail(t.id));
+            
+            const chunkResults = await Promise.all(promises);
+            results.push(...chunkResults);
+
+            // Pause before firing the next chunk (skip on the final iteration)
+            if (i + CHUNK_SIZE < tablesToProcess.length) {
+              await this.sleep(DELAY_MS);
+            }
+          }
+
+          // Process the aggregated results
+          results.forEach(({ tId, success, fields, joins }) => {
+            if (success) {
+              // Populate table Fields and omit table-level joins per instruction
+              tableFields[tId] = {
+                fields: fields
+              };
+              
+              joins
+                .filter((f) => !processedTableSet.has(f.id))
+                .forEach((f) => {
+                  processedTableSet.add(f.id);
+                  newJoinedTables.push(f);
+                });
+            }
+          });
+
+          return {
+            tableFields,
+            newJoinedTables,
+          };
+        }
+
+        async start() {
+          this.init(); 
+          this.setStage("Loading Tables", 0);
+
+          let tables = await this.loadRecordTypes();
+          const processedTableSet = new Set(tables.map((t) => t.id));
+          
+          let allFieldsObject = {};
+          let currentBatch = tables;
+          let iterationCount = 0;
+
+          while (currentBatch.length > 0) {
+            iterationCount++;
+            
+            const stageName = iterationCount === 1 
+              ? "Loading Primary Table Fields" 
+              : `Loading Join Fields: Stage ${iterationCount - 1}`;
+              
+            console.log(`Iteration ${iterationCount}: Processing ${currentBatch.length} tables`);
+            this.setStage(stageName, currentBatch.length);
+
+            const { tableFields, newJoinedTables } = await this.processBatch(
+              currentBatch,
+              processedTableSet
+            );
+
+            tables = tables.concat(
+              newJoinedTables.map(({ id, label }) => ({ id, label }))
+            );
+            
+            currentBatch = newJoinedTables;
+            allFieldsObject = { ...allFieldsObject, ...tableFields };
+          }
+
+          // Final Output payload structured for the MCP Server
+          const result = {
+            tableDirectory: tables,
+            schema: allFieldsObject,
+          };
+
+          this.ui.resultArea.value = JSON.stringify(result, null, 2);
+          this.setStage("Done", 0);
+          
+          // Enable action buttons
+          this.ui.copyBtn.disabled = false;
+          this.ui.downloadBtn.disabled = false;
+        }
+      }
+
+      // --- Global Functions for HTML Event Handlers ---
+      const app = new SuiteQLMetadataLoader();
+
+      function run() {
+        app.start();
+      }
+
+      function copyToClipboard() {
+        const textarea = document.getElementById("result_area");
+        textarea.select();
+        document.execCommand("copy");
+      }
+
+      function downloadToFile() {
+        const text = document.getElementById("result_area").value;
+        if (!text) return;
+
+        // Create a blob from the JSON string
+        const blob = new Blob([text], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+
+        // Create a temporary anchor element to trigger the download
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "opencode_mcp_data.json";
+        document.body.appendChild(a);
+        
+        // Trigger click and cleanup
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    </script>
+  </head>
+  <body>
+    <div class="container">
+      <h1 class="heading">Opencode MCP Data</h1>
+      
+      <div>
+        <button class="run-button" type="button" onclick="run()">Run</button>
+      </div>
+      
+      <h2 id="status">&nbsp;</h2>
+      
+      <div id="myProgress">
+        <div id="myBar">0%</div>
+      </div>
+      
+      <label for="result_area">Results</label>
+
+      <textarea id="result_area" readonly></textarea>
+
+      <div class="action-buttons">
+        <button
+          id="copyBtn"
+          disabled
+          class="copy-button"
+          type="button"
+          onclick="copyToClipboard()"
+        >
+          Copy to Clipboard
+        </button>
+
+        <button
+          id="downloadBtn"
+          disabled
+          class="download-button"
+          type="button"
+          onclick="downloadToFile()"
+        >
+          Download JSON
+        </button>
+      </div>
+    </div>
+  </body>
+</html>
