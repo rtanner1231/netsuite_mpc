@@ -1,0 +1,21 @@
+export const fieldDefaults: Record<string, string | null> = {
+    accesslevel: '2',
+    allowquickadd: 'F',
+    applyformatting: 'T',
+    checkspelling: 'F',
+    defaultchecked: 'F',
+    displayheight: null,
+    displaytype: 'NORMAL',
+    displaywidth: null,
+    encryptatrest: 'F',
+    fieldtype: 'TEXT',
+    globalsearch: 'F',
+    isformula: 'F',
+    ismandatory: 'F',
+    isparent: 'F',
+    onparentdelete: 'SET_NULL',
+    rolerestrict: 'F',
+    searchlevel: '2',
+    showinlist: 'F',
+    storevalue: 'T'
+};

@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.1",
-    "oauth-1.0a": "^2.2.6"
+    "oauth-1.0a": "^2.2.6",
+    "xmlbuilder2": "^4.0.3"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
