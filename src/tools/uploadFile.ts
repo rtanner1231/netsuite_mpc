@@ -60,10 +60,10 @@ export const uploadFileTool: ToolDefinition = {
 
                 if (!finalPath.startsWith('/')) finalPath = '/' + finalPath;
                 if (finalPath.endsWith('.ts')) finalPath = finalPath.slice(0, -3) + '.js';
-                return finalPath;
+                return `"${finalPath}"`;
             });
 
-            const cliPathsString = `"${mappedPaths.join(" ")}"`;
+            const cliPathsString = mappedPaths.join(" ");
 
             try {
                 const { stdout } = await execAsync(`suitecloud file:upload --paths ${cliPathsString}`, { cwd: projectRoot });
