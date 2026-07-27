@@ -270,6 +270,7 @@
             const fieldObj = {
               id: f.id.toLowerCase(),
               label: f.label,
+              fieldType: f.fieldType
             };
 
             if (f.joins && f.joins.length > 0) {
@@ -374,7 +375,8 @@
               tableid TEXT, 
               id TEXT, 
               label TEXT, 
-              joins TEXT
+              joins TEXT,
+              fieldtype TEXT
             );
           `);
 
@@ -392,11 +394,11 @@
           stmtTable.free();
 
           // Insert Fields
-          const stmtField = this.db.prepare("INSERT INTO tablefields (tableid, id, label, joins) VALUES (?, ?, ?, ?)");
+          const stmtField = this.db.prepare("INSERT INTO tablefields (tableid, id, label, joins, fieldtype) VALUES (?, ?, ?, ?, ?)");
           for (const [tableId, tableData] of Object.entries(allFieldsObject)) {
             for (const f of tableData.fields) {
               const joinsStr = f.joins && f.joins.length > 0 ? JSON.stringify(f.joins) : null;
-              stmtField.run([tableId, f.id, f.label || "", joinsStr]);
+              stmtField.run([tableId, f.id, f.label || "", joinsStr, f.fieldType || ""]);
             }
           }
           stmtField.free();
@@ -486,14 +488,21 @@
             // Upsert the table record
             this.db.run("INSERT OR IGNORE INTO tables (id, label) VALUES (?, ?)", [tableNameInput, tableNameInput]);
             
+            // Add column to tablefields if loading into an old db that might be missing it (fail gracefully if it exists)
+            try {
+                this.db.run("ALTER TABLE tablefields ADD COLUMN fieldtype TEXT;");
+            } catch (e) {
+                // Column likely already exists, ignore
+            }
+
             // Delete existing fields for this table to prevent duplicates during UPSERT
             this.db.run("DELETE FROM tablefields WHERE tableid = ?", [tableNameInput]);
 
             // Insert new fields
-            const stmtField = this.db.prepare("INSERT INTO tablefields (tableid, id, label, joins) VALUES (?, ?, ?, ?)");
+            const stmtField = this.db.prepare("INSERT INTO tablefields (tableid, id, label, joins, fieldtype) VALUES (?, ?, ?, ?, ?)");
             for (const f of result.fields) {
                 const joinsStr = f.joins && f.joins.length > 0 ? JSON.stringify(f.joins) : null;
-                stmtField.run([tableNameInput, f.id, f.label || "", joinsStr]);
+                stmtField.run([tableNameInput, f.id, f.label || "", joinsStr, f.fieldType || ""]);
             }
             stmtField.free();
             this.db.run("COMMIT;");

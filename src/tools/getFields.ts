@@ -35,7 +35,7 @@ export const getNetsuiteFieldsTool: ToolDefinition = {
             });
 
             const rows = await db.all(
-                'SELECT id, label, joins FROM tablefields WHERE tableid = ?',
+                'SELECT id, label, joins, fieldtype FROM tablefields WHERE tableid = ?',
                 [table_id]
             );
 
@@ -48,7 +48,8 @@ export const getNetsuiteFieldsTool: ToolDefinition = {
             const lines = [`Fields for '${table_id}' in ${environment}:`];
 
             rows.forEach((row: any) => {
-                lines.push(`- ${row.id || "unknown_id"} (${row.label || "No Label"})`);
+                const typeStr = row.fieldtype ? ` [Type: ${row.fieldtype}]` : "";
+                lines.push(`- ${row.id || "unknown_id"}${typeStr} (${row.label || "No Label"})`);
                 if (row.joins) {
                     try {
                         const parsedJoins = JSON.parse(row.joins);
