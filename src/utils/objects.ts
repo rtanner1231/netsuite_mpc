@@ -67,6 +67,30 @@ export const deploySdfObject = async (
 }
 
 /**
+ * Downloads the latest XML representation of an object via SDF.
+ * @returns The file path of the downloaded object
+ */
+export const downloadSdfObject = async (
+    projectRoot: string,
+    scriptId: string,
+    type: string
+): Promise<string> => {
+    const branchFolder = await getSanitizedBranchName(projectRoot);
+    const objectsDir = path.join(projectRoot, "dist", "Objects", branchFolder);
+
+    try {
+        await fs.access(objectsDir);
+    } catch {
+        await fs.mkdir(objectsDir, { recursive: true });
+    }
+
+    const command = `suitecloud object:import --type ${type} --scriptid ${scriptId} --destinationfolder /Objects/${branchFolder}`;
+    await execAsync(command, { cwd: projectRoot });
+
+    return path.join(objectsDir, `${scriptId}.xml`);
+}
+
+/**
  * Generates an SDF-compliant XML string from a JavaScript object.
  * @param rootElement The root XML element name (e.g., 'customrecordtype')
  * @param scriptId The internal ID of the object

@@ -6,6 +6,7 @@ import { runFunctionTool } from "./runFunction.js";
 import { loadRecordSampleTool } from "./loadRecordSample.js";
 import { createCustomRecordTool } from "./createCustomRecord.js";
 import { createCustomListTool } from "./createCustomList.js";
+import { updateCustomRecordTool } from "./updateCustomRecord.js";
 
 export const toolsRegistry = [
     getNetsuiteFieldsTool,
@@ -15,5 +16,6 @@ export const toolsRegistry = [
     runFunctionTool,
     loadRecordSampleTool,
     createCustomRecordTool,
-    createCustomListTool
+    createCustomListTool,
+    updateCustomRecordTool
 ];
