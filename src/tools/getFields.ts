@@ -1,5 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
+import sqlite3 from "sqlite3";
+import { open } from "sqlite";
 import { ToolDefinition } from "../types/index.js";
 import { getActiveEnvironment, MCP_DIR } from "../utils/config.js";
 
@@ -17,37 +19,57 @@ export const getNetsuiteFieldsTool: ToolDefinition = {
         try { environment = await getActiveEnvironment(); }
         catch (error: any) { return { content: [{ type: "text", text: `Config Error: ${error.message}` }] }; }
 
-        const schemaPath = path.join(MCP_DIR, `${environment}.json`);
+        const schemaPath = path.join(MCP_DIR, `${environment}.db`);
 
         try {
-            const fileData = await fs.readFile(schemaPath, "utf-8");
-            const schemaData = JSON.parse(fileData);
-            const tableFields = schemaData.schema || {};
+            await fs.access(schemaPath);
+        } catch (error: any) {
+            return { content: [{ type: "text", text: `Error: Schema file missing at ${schemaPath}.` }] };
+        }
 
-            if (!tableFields[table_id]) {
+        try {
+            const db = await open({
+                filename: schemaPath,
+                driver: sqlite3.Database,
+                mode: sqlite3.OPEN_READONLY
+            });
+
+            const rows = await db.all(
+                'SELECT id, label, joins FROM tablefields WHERE tableid = ?',
+                [table_id]
+            );
+
+            await db.close();
+
+            if (!rows || rows.length === 0) {
                 return { content: [{ type: "text", text: `Error: Table ID '${table_id}' not found in the ${environment} schema.` }] };
             }
 
-            const fields = tableFields[table_id].fields;
             const lines = [`Fields for '${table_id}' in ${environment}:`];
 
-            fields.forEach((field: any) => {
-                lines.push(`- ${field.id || "unknown_id"} (${field.label || "No Label"})`);
-                if (Array.isArray(field.joins) && field.joins.length > 0) {
-                    field.joins.forEach((join: any) => {
-                        lines.push(`  - Join: ${join.id || "unknown_join_id"} (${join.label || "No Label"})`);
-                        if (Array.isArray(join.joinPairs)) {
-                            join.joinPairs.forEach((pair: any) => {
-                                lines.push(`    - Pair: ${pair.id || "unknown_pair_id"} [${pair.label || "No Label"}]`);
+            rows.forEach((row: any) => {
+                lines.push(`- ${row.id || "unknown_id"} (${row.label || "No Label"})`);
+                if (row.joins) {
+                    try {
+                        const parsedJoins = JSON.parse(row.joins);
+                        if (Array.isArray(parsedJoins) && parsedJoins.length > 0) {
+                            parsedJoins.forEach((join: any) => {
+                                lines.push(`  - Join: ${join.id || "unknown_join_id"} (${join.label || "No Label"})`);
+                                if (Array.isArray(join.joinPairs)) {
+                                    join.joinPairs.forEach((pair: any) => {
+                                        lines.push(`    - Pair: ${pair.id || "unknown_pair_id"} [${pair.label || "No Label"}]`);
+                                    });
+                                }
                             });
                         }
-                    });
+                    } catch (e) {
+                        // ignore JSON parse error for joins
+                    }
                 }
             });
 
             return { content: [{ type: "text", text: lines.join("\n") }] };
         } catch (error: any) {
-            if (error.code === "ENOENT") return { content: [{ type: "text", text: `Error: Schema file missing at ${schemaPath}.` }] };
             return { content: [{ type: "text", text: `Error reading/parsing schema: ${error.message}` }] };
         }
     }

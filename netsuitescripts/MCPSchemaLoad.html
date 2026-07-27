@@ -1,6 +1,8 @@
 <html>
   <head>
-    <title>OpenCode MCP Data</title>
+    <title>MCP Schema Data</title>
+    <!-- Include sql.js for client-side SQLite generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
     <style>
       /* --- General Layout --- */
       body {
@@ -23,13 +25,6 @@
         font-weight: bold;
         margin-bottom: 20px;
         color: #333;
-      }
-
-      label {
-        font-size: 20px;
-        display: block;
-        margin-bottom: 10px;
-        font-weight: bold;
       }
 
       #status {
@@ -58,16 +53,43 @@
         transition: width 0.3s ease;
       }
 
-      textarea {
+      /* --- Inputs & Toggles --- */
+      .mode-selector {
+        margin: 20px 0;
+        font-size: 18px;
+      }
+      .mode-selector label {
+        margin: 0 15px;
+        cursor: pointer;
+        font-weight: bold;
+      }
+      .input-group {
+        margin: 20px auto;
+        padding: 20px;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        width: 50%;
+        text-align: left;
+      }
+      .input-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: bold;
+        color: #333;
+      }
+      .input-group input[type="text"], .input-group input[type="file"] {
         width: 100%;
         padding: 10px;
-        height: 400px;
-        margin-bottom: 20px;
-        resize: none;
+        margin-bottom: 15px;
         border: 1px solid #ccc;
         border-radius: 4px;
         box-sizing: border-box;
-        font-family: monospace;
+      }
+      .inline-input {
+        display: flex;
+        align-items: center;
+        gap: 5px;
       }
 
       /* --- Buttons --- */
@@ -83,9 +105,10 @@
       .run-button {
         background-color: green;
         color: white;
-        width: 100px;
-        margin: 0 auto;
+        width: 150px;
+        margin: 20px auto;
         display: block;
+        font-weight: bold;
       }
       .run-button:hover {
         background-color: darkgreen;
@@ -95,27 +118,14 @@
         display: flex;
         justify-content: center;
         gap: 15px;
-        margin-bottom: 40px;
-      }
-
-      .copy-button {
-        background-color: #007bff;
-        color: white;
-        width: 160px;
-      }
-      .copy-button:hover:not(:disabled) {
-        background-color: #0056b3;
-      }
-      .copy-button:disabled {
-        background-color: #ccc;
-        color: #999;
-        cursor: not-allowed;
+        margin-top: 40px;
+        padding-bottom: 40px;
       }
 
       .download-button {
         background-color: #6f42c1;
         color: white;
-        width: 160px;
+        width: 250px;
       }
       .download-button:hover:not(:disabled) {
         background-color: #59339d;
@@ -129,11 +139,13 @@
 
     <script language="javascript">
       /**
-       * Main Class to handle SuiteQL Metadata Loading
+       * Main Class to handle SuiteQL Metadata Loading and SQLite export
        */
       class SuiteQLMetadataLoader {
         constructor() {
           this.endpoint = "/app/recordscatalog/rcendpoint.nl";
+          this.db = null; // Will hold the SQL.js database instance
+          this.downloadFilename = "netsuite_metadata.db"; // Default
           this.state = {
             currentIterTotal: 0,
             currentIterNum: 0,
@@ -144,8 +156,6 @@
           this.ui = {
             bar: null,
             status: null,
-            resultArea: null,
-            copyBtn: null,
             downloadBtn: null,
           };
         }
@@ -153,8 +163,6 @@
         init() {
           this.ui.bar = document.getElementById("myBar");
           this.ui.status = document.getElementById("status");
-          this.ui.resultArea = document.getElementById("result_area");
-          this.ui.copyBtn = document.getElementById("copyBtn");
           this.ui.downloadBtn = document.getElementById("downloadBtn");
         }
 
@@ -217,9 +225,6 @@
             }
         }   
 
-        /**
-         * Helper to fetch the internal numerical ID for a table/record.
-         */
         async getRecordId(rec){
             try{
                 const requestUrl=`/app/common/scripting/ClientScriptHandler.nl?script=&deploy=&jrid=1&jrmethod=remoteObject.nlapiResolveURL&jrparams=["RECORD"%2C"${rec}"%2C1%2Cnull]`
@@ -261,7 +266,6 @@
           const fieldsData = result.data;
           const discoveredJoins = [];
           
-          // Process Fields naturally grabbing their inherent joins/joinPairs
           const fields = (fieldsData.fields || []).map((f) => {
             const fieldObj = {
               id: f.id.toLowerCase(),
@@ -310,11 +314,9 @@
           const newJoinedTables = [];
           const results = [];
           
-          // Throttling configuration
-          const CHUNK_SIZE = 10; // Max concurrent requests
-          const DELAY_MS = 500;  // Pause between chunks in milliseconds
+          const CHUNK_SIZE = 10; 
+          const DELAY_MS = 500;  
 
-          // Process the array in chunks rather than all at once
           for (let i = 0; i < tablesToProcess.length; i += CHUNK_SIZE) {
             const chunk = tablesToProcess.slice(i, i + CHUNK_SIZE);
             const promises = chunk.map((t) => this.loadTableDetail(t.id));
@@ -322,16 +324,13 @@
             const chunkResults = await Promise.all(promises);
             results.push(...chunkResults);
 
-            // Pause before firing the next chunk (skip on the final iteration)
             if (i + CHUNK_SIZE < tablesToProcess.length) {
               await this.sleep(DELAY_MS);
             }
           }
 
-          // Process the aggregated results
           results.forEach(({ tId, success, fields, joins }) => {
             if (success) {
-              // Populate table Fields and omit table-level joins per instruction
               tableFields[tId] = {
                 fields: fields
               };
@@ -351,8 +350,65 @@
           };
         }
 
-        async start() {
-          this.init(); 
+        async generateSQLiteDatabase(tables, allFieldsObject) {
+          this.setStage("Generating SQLite Database", 100);
+
+          // Initialize sql.js WebAssembly
+          const sqlPromise = initSqlJs({
+            locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+          });
+          
+          const SQL = await sqlPromise;
+          this.db = new SQL.Database();
+
+          // Create schema
+          this.db.run(`
+            CREATE TABLE tables (
+              id TEXT PRIMARY KEY, 
+              label TEXT
+            );
+          `);
+
+          this.db.run(`
+            CREATE TABLE tablefields (
+              tableid TEXT, 
+              id TEXT, 
+              label TEXT, 
+              joins TEXT
+            );
+          `);
+
+          // Create tableid index for efficient queries
+          this.db.run("CREATE INDEX idx_tablefields_tableid ON tablefields(tableid);");
+
+          // Start a transaction for bulk insert efficiency
+          this.db.run("BEGIN TRANSACTION;");
+
+          // Insert Tables
+          const stmtTable = this.db.prepare("INSERT OR IGNORE INTO tables (id, label) VALUES (?, ?)");
+          for (const t of tables) {
+            stmtTable.run([t.id, t.label || ""]);
+          }
+          stmtTable.free();
+
+          // Insert Fields
+          const stmtField = this.db.prepare("INSERT INTO tablefields (tableid, id, label, joins) VALUES (?, ?, ?, ?)");
+          for (const [tableId, tableData] of Object.entries(allFieldsObject)) {
+            for (const f of tableData.fields) {
+              const joinsStr = f.joins && f.joins.length > 0 ? JSON.stringify(f.joins) : null;
+              stmtField.run([tableId, f.id, f.label || "", joinsStr]);
+            }
+          }
+          stmtField.free();
+
+          this.db.run("COMMIT;");
+          this.incrementProgress();
+        }
+
+        async startFull() {
+          const filenameInput = document.getElementById("outFilename").value.trim() || "netsuite_metadata";
+          this.downloadFilename = filenameInput + ".db";
+
           this.setStage("Loading Tables", 0);
 
           let tables = await this.loadRecordTypes();
@@ -385,18 +441,99 @@
             allFieldsObject = { ...allFieldsObject, ...tableFields };
           }
 
-          // Final Output payload structured for the MCP Server
-          const result = {
-            tableDirectory: tables,
-            schema: allFieldsObject,
-          };
+          // Build SQLite DB with the aggregated data
+          await this.generateSQLiteDatabase(tables, allFieldsObject);
+        }
 
-          this.ui.resultArea.value = JSON.stringify(result, null, 2);
-          this.setStage("Done", 0);
+        async startSingle() {
+            const fileInput = document.getElementById("dbFileInput");
+            const tableNameInput = document.getElementById("tableNameInput").value.trim().toLowerCase();
+
+            if (!fileInput.files.length) {
+                alert("Please select an existing SQLite database file.");
+                throw new Error("No file selected.");
+            }
+            if (!tableNameInput) {
+                alert("Please provide a table name.");
+                throw new Error("No table name provided.");
+            }
+
+            const file = fileInput.files[0];
+            this.downloadFilename = file.name; // Retain original file name
+
+            this.setStage("Reading Database File", 1);
+            const fileData = await this.readFile(file);
+            
+            this.setStage("Initializing SQLite", 1);
+            const sqlPromise = initSqlJs({
+                locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+            });
+            const SQL = await sqlPromise;
+            this.db = new SQL.Database(fileData);
+            this.incrementProgress();
+
+            this.setStage(`Fetching metadata for table: ${tableNameInput}`, 1);
+            const result = await this.loadTableDetail(tableNameInput);
+
+            if (!result.success) {
+                alert(`Failed to load metadata for table ${tableNameInput}. Verify the table name.`);
+                throw new Error("Metadata fetch failed.");
+            }
+
+            this.setStage("Updating Database", 1);
+            this.db.run("BEGIN TRANSACTION;");
+            
+            // Upsert the table record
+            this.db.run("INSERT OR IGNORE INTO tables (id, label) VALUES (?, ?)", [tableNameInput, tableNameInput]);
+            
+            // Delete existing fields for this table to prevent duplicates during UPSERT
+            this.db.run("DELETE FROM tablefields WHERE tableid = ?", [tableNameInput]);
+
+            // Insert new fields
+            const stmtField = this.db.prepare("INSERT INTO tablefields (tableid, id, label, joins) VALUES (?, ?, ?, ?)");
+            for (const f of result.fields) {
+                const joinsStr = f.joins && f.joins.length > 0 ? JSON.stringify(f.joins) : null;
+                stmtField.run([tableNameInput, f.id, f.label || "", joinsStr]);
+            }
+            stmtField.free();
+            this.db.run("COMMIT;");
+            
+            this.incrementProgress();
+        }
+
+        readFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(new Uint8Array(e.target.result));
+                reader.onerror = (e) => reject(e);
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        async start() {
+          this.init(); 
+          this.ui.downloadBtn.disabled = true;
           
-          // Enable action buttons
-          this.ui.copyBtn.disabled = false;
-          this.ui.downloadBtn.disabled = false;
+          // Reset UI
+          this.ui.bar.style.width = "0%";
+          this.ui.bar.innerHTML = "0%";
+          this.ui.status.innerHTML = "";
+          
+          const mode = document.querySelector('input[name="mode"]:checked').value;
+
+          try {
+            if (mode === 'full') {
+                await this.startFull();
+            } else {
+                await this.startSingle();
+            }
+
+            this.setStage("Ready for Download", 0);
+            this.ui.downloadBtn.disabled = false;
+          } catch (e) {
+            console.error("Execution failed:", e);
+            this.setStage("Process Failed", 0);
+          }
         }
       }
 
@@ -407,39 +544,68 @@
         app.start();
       }
 
-      function copyToClipboard() {
-        const textarea = document.getElementById("result_area");
-        textarea.select();
-        document.execCommand("copy");
-      }
-
       function downloadToFile() {
-        const text = document.getElementById("result_area").value;
-        if (!text) return;
+        if (!app.db) return;
 
-        // Create a blob from the JSON string
-        const blob = new Blob([text], { type: "application/json" });
+        // Export the database to a Uint8Array
+        const data = app.db.export();
+        
+        // Create a blob and trigger download
+        const blob = new Blob([data], { type: "application/octet-stream" });
         const url = URL.createObjectURL(blob);
 
-        // Create a temporary anchor element to trigger the download
         const a = document.createElement("a");
         a.href = url;
-        a.download = "opencode_mcp_data.json";
+        a.download = app.downloadFilename;
         document.body.appendChild(a);
         
-        // Trigger click and cleanup
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+      }
+
+      function toggleMode() {
+        const mode = document.querySelector('input[name="mode"]:checked').value;
+        if (mode === 'full') {
+            document.getElementById('full-inputs').style.display = 'block';
+            document.getElementById('single-inputs').style.display = 'none';
+        } else {
+            document.getElementById('full-inputs').style.display = 'none';
+            document.getElementById('single-inputs').style.display = 'block';
+        }
       }
     </script>
   </head>
   <body>
     <div class="container">
-      <h1 class="heading">Opencode MCP Data</h1>
+      <h1 class="heading">MCP Schema Data</h1>
+      
+      <!-- Mode Selection -->
+      <div class="mode-selector">
+        <label><input type="radio" name="mode" value="full" checked onchange="toggleMode()"> Full Schema Export</label>
+        <label><input type="radio" name="mode" value="single" onchange="toggleMode()"> Single Table Update</label>
+      </div>
+
+      <!-- Full Schema Inputs -->
+      <div id="full-inputs" class="input-group">
+        <label for="outFilename">Filename (without extension):</label>
+        <div class="inline-input">
+            <input type="text" id="outFilename" placeholder="SB2" value="netsuite_metadata"> 
+            <strong>.db</strong>
+        </div>
+      </div>
+
+      <!-- Single Table Update Inputs -->
+      <div id="single-inputs" class="input-group" style="display: none;">
+        <label for="dbFileInput">Existing SQLite Database File:</label>
+        <input type="file" id="dbFileInput" accept=".db,.sqlite">
+        
+        <label for="tableNameInput">Table Name (to update/insert):</label>
+        <input type="text" id="tableNameInput" placeholder="e.g., transaction">
+      </div>
       
       <div>
-        <button class="run-button" type="button" onclick="run()">Run</button>
+        <button class="run-button" type="button" onclick="run()">Run Extraction</button>
       </div>
       
       <h2 id="status">&nbsp;</h2>
@@ -448,21 +614,7 @@
         <div id="myBar">0%</div>
       </div>
       
-      <label for="result_area">Results</label>
-
-      <textarea id="result_area" readonly></textarea>
-
       <div class="action-buttons">
-        <button
-          id="copyBtn"
-          disabled
-          class="copy-button"
-          type="button"
-          onclick="copyToClipboard()"
-        >
-          Copy to Clipboard
-        </button>
-
         <button
           id="downloadBtn"
           disabled
@@ -470,7 +622,7 @@
           type="button"
           onclick="downloadToFile()"
         >
-          Download JSON
+          Download SQLite Database
         </button>
       </div>
     </div>
