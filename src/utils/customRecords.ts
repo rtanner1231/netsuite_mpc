@@ -48,7 +48,9 @@ export const standardRecordSdfIds: Record<string, number> = {
     'transaction': -30,
     'transactiontype': -100,
     'vendor': -3,
-    'vendorcategory': -110
+    'vendorcategory': -110,
+    'shipitem': -192,
+    'shipmethod': -192
 };
 
 /**
