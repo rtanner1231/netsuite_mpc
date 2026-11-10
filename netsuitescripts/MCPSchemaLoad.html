@@ -1,40 +1,34 @@
+<!doctype html>
 <html>
   <head>
     <title>MCP Schema Data</title>
     <!-- Include sql.js for client-side SQLite generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
     <style>
-      /* --- General Layout --- */
       body {
         margin: 0;
         padding: 0;
         font-family: "Arial", sans-serif;
         background-color: #f2f2f2;
       }
-
       .container {
         width: 80%;
         margin: 0 auto;
         text-align: center;
         padding-top: 20px;
       }
-
-      /* --- Typography --- */
       .heading {
-        font-size: 38px;
+        font-size: 34px;
         font-weight: bold;
         margin-bottom: 20px;
         color: #333;
       }
-
       #status {
-        font-size: 18px;
+        font-size: 17px;
         margin: 20px auto;
-        min-height: 24px; /* Prevent layout shift */
+        min-height: 24px;
         color: #555;
       }
-
-      /* --- Components --- */
       #myProgress {
         width: 100%;
         background-color: #ddd;
@@ -42,7 +36,6 @@
         border-radius: 5px;
         overflow: hidden;
       }
-
       #myBar {
         width: 0%;
         height: 30px;
@@ -52,11 +45,9 @@
         color: white;
         transition: width 0.3s ease;
       }
-
-      /* --- Inputs & Toggles --- */
       .mode-selector {
         margin: 20px 0;
-        font-size: 18px;
+        font-size: 16px;
       }
       .mode-selector label {
         margin: 0 15px;
@@ -68,7 +59,7 @@
         padding: 20px;
         background: #fff;
         border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         width: 50%;
         text-align: left;
       }
@@ -78,7 +69,8 @@
         font-weight: bold;
         color: #333;
       }
-      .input-group input[type="text"], .input-group input[type="file"] {
+      .input-group input[type="text"],
+      .input-group input[type="file"] {
         width: 100%;
         padding: 10px;
         margin-bottom: 15px;
@@ -91,8 +83,6 @@
         align-items: center;
         gap: 5px;
       }
-
-      /* --- Buttons --- */
       button {
         height: 40px;
         border: none;
@@ -101,11 +91,19 @@
         cursor: pointer;
         transition: background-color 0.2s;
       }
-
+      .btn-secondary {
+        background-color: #007bff;
+        color: white;
+        width: 100%;
+        margin-bottom: 8px;
+      }
+      .btn-secondary:hover {
+        background-color: #0056b3;
+      }
       .run-button {
         background-color: green;
         color: white;
-        width: 150px;
+        width: 180px;
         margin: 20px auto;
         display: block;
         font-weight: bold;
@@ -113,7 +111,6 @@
       .run-button:hover {
         background-color: darkgreen;
       }
-
       .action-buttons {
         display: flex;
         justify-content: center;
@@ -121,7 +118,6 @@
         margin-top: 40px;
         padding-bottom: 40px;
       }
-
       .download-button {
         background-color: #6f42c1;
         color: white;
@@ -138,44 +134,47 @@
     </style>
 
     <script language="javascript">
-      /**
-       * Main Class to handle SuiteQL Metadata Loading and SQLite export
-       */
       class SuiteQLMetadataLoader {
         constructor() {
           this.endpoint = "/app/recordscatalog/rcendpoint.nl";
-          this.db = null; // Will hold the SQL.js database instance
-          this.downloadFilename = "netsuite_metadata.db"; // Default
+          this.db = null;
+          this.downloadFilename = "netsuite_metadata.db";
+          this.fileHandle = null; // Supports in-place overwriting
           this.state = {
             currentIterTotal: 0,
             currentIterNum: 0,
             currentStage: "",
           };
-          
-          // DOM Elements cache
-          this.ui = {
-            bar: null,
-            status: null,
-            downloadBtn: null,
-          };
+          this.ui = { bar: null, status: null, downloadBtn: null };
+          this._fileInputBound = false;
         }
 
         init() {
           this.ui.bar = document.getElementById("myBar");
           this.ui.status = document.getElementById("status");
           this.ui.downloadBtn = document.getElementById("downloadBtn");
-        }
 
-        // --- UI Methods ---
+          const fileInput = document.getElementById("dbFileInput");
+          if (fileInput && !this._fileInputBound) {
+            fileInput.addEventListener("change", () => {
+              if (fileInput.files.length > 0) {
+                this.fileHandle = null;
+                const label = document.getElementById("linkedFileLabel");
+                label.innerText = `Uploaded: ${fileInput.files[0].name} (will download copy)`;
+                label.style.color = "#555";
+              }
+            });
+            this._fileInputBound = true;
+          }
+        }
 
         updateUI() {
           const { currentIterTotal, currentIterNum, currentStage } = this.state;
-          const percentage = currentIterTotal === 0 
-            ? 0 
-            : Math.round((currentIterNum / currentIterTotal) * 100);
-          
+          const percentage =
+            currentIterTotal === 0
+              ? 0
+              : Math.round((currentIterNum / currentIterTotal) * 100);
           const percentString = `${percentage}%`;
-          
           this.ui.bar.style.width = percentString;
           this.ui.bar.innerHTML = percentString;
           this.ui.status.innerHTML = currentStage;
@@ -194,18 +193,60 @@
         }
 
         sleep(ms) {
-          return new Promise(resolve => setTimeout(resolve, ms));
+          return new Promise((resolve) => setTimeout(resolve, ms));
         }
 
-        // --- API / Network Methods ---
+        // --- File System Access API (In-place editing) ---
+
+        async selectDatabaseInPlace() {
+          if (!("showOpenFilePicker" in window)) {
+            alert(
+              "Your browser does not support in-place file editing. Please use Chrome/Edge or use the standard file selector below.",
+            );
+            return;
+          }
+
+          try {
+            const [handle] = await window.showOpenFilePicker({
+              types: [
+                {
+                  description: "SQLite Database",
+                  accept: { "application/x-sqlite3": [".db", ".sqlite"] },
+                },
+              ],
+              multiple: false,
+            });
+
+            // Request WRITE permission immediately while user activation is active
+            const permStatus = await handle.requestPermission({
+              mode: "readwrite",
+            });
+            if (permStatus !== "granted") {
+              alert(
+                "Write permission was not granted. The database cannot be updated in-place.",
+              );
+              return;
+            }
+
+            this.fileHandle = handle;
+            const file = await handle.getFile();
+            this.downloadFilename = file.name;
+
+            const label = document.getElementById("linkedFileLabel");
+            label.innerText = `Linked: ${file.name} (will overwrite in-place)`;
+            label.style.color = "green";
+          } catch (err) {
+            console.log("File selection cancelled or failed:", err);
+          }
+        }
+
+        // --- Network & SuiteQL Runners ---
 
         async runRequest(action, data) {
           try {
             const url = `${this.endpoint}?action=${action}&data=${data}`;
             const response = await fetch(url);
-            
             if (!response.ok) return { success: false };
-            
             const result = await response.json();
             return { success: true, result };
           } catch (e) {
@@ -214,38 +255,114 @@
           }
         }
 
-        getRectype(urlString) {
-            try {
-                const url = new URL(urlString, "http://dummy");
-                const rectype = url.searchParams.get("rectype");
-                return rectype !== null ? rectype : "";
-            } catch (e) {
-                console.error("Invalid URL provided:", e);
-                return "";
-            }
-        }   
+        /**
+         * Runs SuiteQL using N/query runSuiteQLPaged to overcome the 1000-row limit.
+         * Falls back to paginated REST Web Services query if N/query is unavailable.
+         */
+        async runSuiteQL(sql) {
+          const nsRequire =
+            window.require ||
+            (window.parent && window.parent.require) ||
+            (window.opener && window.opener.require);
 
-        async getRecordId(rec){
-            try{
-                const requestUrl=`/app/common/scripting/ClientScriptHandler.nl?script=&deploy=&jrid=1&jrmethod=remoteObject.nlapiResolveURL&jrparams=["RECORD"%2C"${rec}"%2C1%2Cnull]`
-                const result=await fetch(requestUrl);
-                const body=await result.json();
+          if (nsRequire) {
+            return new Promise((resolve, reject) => {
+              nsRequire(
+                ["N/query"],
+                (query) => {
+                  try {
+                    const pagedData = query.runSuiteQLPaged({
+                      query: sql,
+                      pageSize: 1000,
+                    });
 
-                if(!body.result){
-                   return '';
-                }
-                const resultUrl=body.result;
-                return this.getRectype(resultUrl);
-            } catch(e) {
-                  return '';
+                    const allResults = [];
+                    if (pagedData && pagedData.pageRanges) {
+                      const totalPages = pagedData.pageRanges.length;
+                      console.log(
+                        `SuiteQL Paged: Matched ${pagedData.count} total records across ${totalPages} page(s).`,
+                      );
+
+                      for (let i = 0; i < totalPages; i++) {
+                        const pageRange = pagedData.pageRanges[i];
+                        const page = pagedData.fetch({
+                          index: pageRange.index,
+                        });
+                        if (page && page.data) {
+                          const mapped = page.data.asMappedResults();
+                          if (mapped && mapped.length > 0) {
+                            allResults.push(...mapped);
+                          }
+                        }
+                        console.log(
+                          `Retrieved page ${i + 1}/${totalPages} (${allResults.length} records so far)`,
+                        );
+                      }
+                    }
+                    resolve(allResults);
+                  } catch (pagedErr) {
+                    console.warn(
+                      "runSuiteQLPaged encountered an error, attempting unpaged runSuiteQL:",
+                      pagedErr,
+                    );
+                    try {
+                      const queryResults = query
+                        .runSuiteQL({ query: sql })
+                        .asMappedResults();
+                      resolve(queryResults);
+                    } catch (innerErr) {
+                      reject(pagedErr);
+                    }
+                  }
+                },
+                (err) => reject(err),
+              );
+            });
+          }
+
+          // Fallback: REST query endpoint with limit & offset pagination
+          let allItems = [];
+          let offset = 0;
+          const limit = 1000;
+          let hasMore = true;
+
+          while (hasMore) {
+            const res = await fetch(
+              `/services/rest/query/v1/suiteql?limit=${limit}&offset=${offset}`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Prefer: "transient",
+                },
+                body: JSON.stringify({ q: sql }),
+              },
+            );
+
+            if (!res.ok) {
+              throw new Error(
+                `SuiteQL execution failed with HTTP ${res.status}. Ensure you have permissions or execute from a NetSuite page.`,
+              );
             }
+
+            const body = await res.json();
+            const items = body.items || [];
+            allItems.push(...items);
+
+            if (body.hasMore && items.length > 0) {
+              offset += limit;
+            } else {
+              hasMore = false;
+            }
+          }
+
+          return allItems;
         }
 
         async loadRecordTypes() {
           const action = "getRecordTypes";
           const data = encodeURI(JSON.stringify({ structureType: "FLAT" }));
           const { success, result } = await this.runRequest(action, data);
-
           if (!success) return [];
 
           return result.data.map((t) => ({
@@ -257,40 +374,46 @@
         async loadTableDetail(tableId) {
           const action = "getRecordTypeDetail";
           const data = encodeURI(
-            JSON.stringify({ scriptId: tableId, detailType: "ss_anal" })
+            JSON.stringify({ scriptId: tableId, detailType: "ss_anal" }),
           );
           const { success, result } = await this.runRequest(action, data);
-
           if (!success) return { success: false };
 
-          const fieldsData = result.data;
+          const recordData = result.data || {};
+          const tableDescription = recordData.description || "";
           const discoveredJoins = [];
-          
-          const fields = (fieldsData.fields || []).map((f) => {
+
+          const fields = (recordData.fields || []).map((f) => {
             const fieldObj = {
               id: f.id.toLowerCase(),
-              label: f.label,
-              fieldType: f.fieldType
+              label: f.label || "",
+              description: f.description || f.help || "",
+              fieldType: f.fieldType || "",
             };
 
             if (f.joins && f.joins.length > 0) {
               fieldObj.joins = f.joins.map((join) => {
                 const target = join.sourceTargetType;
+                const targetId =
+                  target && target.id ? target.id.toLowerCase() : "";
 
-                if (target && target.id) {
-                    discoveredJoins.push({
-                        id: target.id.toLowerCase(),
-                        label: target.label
-                    });
+                if (targetId && !targetId.startsWith("customrecord")) {
+                  discoveredJoins.push({
+                    id: targetId,
+                    label: target.label || "",
+                  });
                 }
 
                 return {
-                  id: target ? target.id.toLowerCase() : "",
+                  id: targetId,
                   label: target ? target.label : "",
-                  joinPairs: target && target.joinPairs ? target.joinPairs.map(jp => ({
-                      id: jp.id,
-                      label: jp.label
-                  })) : []
+                  joinPairs:
+                    target && target.joinPairs
+                      ? target.joinPairs.map((jp) => ({
+                          id: jp.id,
+                          label: jp.label,
+                        }))
+                      : [],
                 };
               });
             }
@@ -303,25 +426,202 @@
           return {
             tId: tableId,
             success: true,
+            description: tableDescription,
             fields,
             joins: discoveredJoins,
           };
         }
 
-        // --- Core Logic ---
+        // --- Custom Record SuiteQL Extractor ---
+
+        async extractCustomRecordsWithSuiteQL() {
+          this.setStage("Executing SuiteQL for Custom Records", 2);
+
+          // 1. Fetch Custom Record Types (Tables) including IncludeName
+          const tablesSql = `
+            SELECT 
+              LOWER(ScriptID) AS id,
+              Name            AS label,
+              nvl(aidescription,Description)     AS description,
+              IncludeName     AS includename
+            FROM 
+              CustomRecordType
+            ORDER BY 
+              ScriptID
+          `;
+          const customTablesRaw = await this.runSuiteQL(tablesSql);
+          this.incrementProgress();
+
+          // 2. Fetch Custom Fields and foreign key relationships (Paged)
+          const fieldsSql = `
+            SELECT 
+              LOWER(src.ScriptID)                 AS tableid,
+              LOWER(cf.ScriptID)                  AS id,
+              cf.Name                             AS label,
+              nvl(cf.aidescription,cf.Description)                      AS description,
+              cf.FieldValueType                   AS fieldtype,
+              CASE 
+                WHEN LOWER(cf.FieldValueType) IN ('list/record', 'multiple select') THEN 1 
+                ELSE 0 
+              END                                 AS is_join,
+              LOWER(tgt.ScriptID)                 AS target_custom_table,
+              BUILTIN.DF(cf.FieldValueTypeRecord) AS target_label
+            FROM 
+              CustomRecordType src
+            INNER JOIN 
+              CustomField cf ON cf.RecordType = src.InternalID
+            LEFT JOIN 
+              CustomRecordType tgt ON tgt.InternalID = cf.FieldValueTypeRecord
+            ORDER BY 
+              src.ScriptID, cf.ScriptID
+          `;
+          const customFieldsRaw = await this.runSuiteQL(fieldsSql);
+          this.incrementProgress();
+
+          console.log(
+            `Retrieved ${customFieldsRaw.length} total custom fields across all custom records.`,
+          );
+
+          // Standard built-in fields injected by NetSuite into every custom record
+          const standardCustomRecordFields = [
+            {
+              id: "id",
+              label: "Internal ID",
+              description: "Record internal identifier",
+              fieldType: "INTEGER",
+            },
+            {
+              id: "name",
+              label: "Name",
+              description: "Record name or number",
+              fieldType: "TEXT",
+            },
+            {
+              id: "isinactive",
+              label: "Inactive",
+              description: "Is record inactive",
+              fieldType: "CHECKBOX",
+            },
+            {
+              id: "created",
+              label: "Date Created",
+              description: "Timestamp created",
+              fieldType: "DATETIME",
+            },
+            {
+              id: "lastmodified",
+              label: "Last Modified",
+              description: "Timestamp last modified",
+              fieldType: "DATETIME",
+            },
+            {
+              id: "owner",
+              label: "Owner",
+              description: "Record owner",
+              fieldType: "SELECT",
+            },
+          ];
+
+          const customTables = customTablesRaw.map((r) => ({
+            id: (r.id || "").toLowerCase(),
+            label: r.label || r.id,
+            description: r.description || "",
+            is_custom: 1,
+            include_name: r.includename === "T" ? 1 : 0,
+          }));
+
+          const customFieldsObject = {};
+
+          // Seed standard fields, respecting the include_name flag for the "name" field
+          customTables.forEach((t) => {
+            const applicableStandardFields = standardCustomRecordFields
+              .filter((sf) => sf.id !== "name" || t.include_name === 1)
+              .map((sf) => ({ ...sf, joins: null }));
+
+            customFieldsObject[t.id] = {
+              fields: applicableStandardFields,
+            };
+          });
+
+          // Append all queried custom fields
+          customFieldsRaw.forEach((row) => {
+            const tableId = (row.tableid || "").toLowerCase();
+            const fieldId = (row.id || "").toLowerCase();
+            if (!customFieldsObject[tableId]) {
+              customFieldsObject[tableId] = { fields: [] };
+            }
+
+            const fType = (row.fieldtype || "").toLowerCase();
+            const isListRecord = fType === "list/record";
+            const isMultiSelect = fType === "multiple select";
+            const isJoin = isListRecord || isMultiSelect;
+
+            let joinData = null;
+            if (isJoin) {
+              if (isMultiSelect) {
+                const intermediateTable = `map_${tableId}_${fieldId}`;
+                joinData = [
+                  {
+                    id: intermediateTable,
+                    label: row.target_label
+                      ? `Map (${row.target_label})`
+                      : intermediateTable,
+                    joinPairs: [
+                      {
+                        id: "mapone",
+                        label: "Map One",
+                      },
+                    ],
+                  },
+                ];
+              } else {
+                const targetId =
+                  row.target_custom_table ||
+                  (row.target_label
+                    ? row.target_label.toLowerCase().replace(/\s+/g, "_")
+                    : "");
+                joinData = [
+                  {
+                    id: targetId,
+                    label: row.target_label || "",
+                    joinPairs: [
+                      {
+                        id: "id",
+                        label: "Internal ID",
+                      },
+                    ],
+                  },
+                ];
+              }
+            }
+
+            customFieldsObject[tableId].fields.push({
+              id: fieldId,
+              label: row.label || "",
+              description: row.description || "",
+              fieldType: row.fieldtype || "",
+              joins: joinData,
+            });
+          });
+
+          return { customTables, customFieldsObject };
+        }
+
+        // --- Processing & DB Generation ---
 
         async processBatch(tablesToProcess, processedTableSet) {
           const tableFields = {};
+          const tableDescriptions = {};
           const newJoinedTables = [];
           const results = [];
-          
-          const CHUNK_SIZE = 10; 
-          const DELAY_MS = 500;  
+
+          const CHUNK_SIZE = 10;
+          const DELAY_MS = 300;
 
           for (let i = 0; i < tablesToProcess.length; i += CHUNK_SIZE) {
             const chunk = tablesToProcess.slice(i, i + CHUNK_SIZE);
             const promises = chunk.map((t) => this.loadTableDetail(t.id));
-            
+
             const chunkResults = await Promise.all(promises);
             results.push(...chunkResults);
 
@@ -330,12 +630,11 @@
             }
           }
 
-          results.forEach(({ tId, success, fields, joins }) => {
+          results.forEach(({ tId, success, description, fields, joins }) => {
             if (success) {
-              tableFields[tId] = {
-                fields: fields
-              };
-              
+              tableFields[tId] = { fields };
+              tableDescriptions[tId] = description || "";
+
               joins
                 .filter((f) => !processedTableSet.has(f.id))
                 .forEach((f) => {
@@ -345,28 +644,27 @@
             }
           });
 
-          return {
-            tableFields,
-            newJoinedTables,
-          };
+          return { tableFields, tableDescriptions, newJoinedTables };
         }
 
         async generateSQLiteDatabase(tables, allFieldsObject) {
           this.setStage("Generating SQLite Database", 100);
 
-          // Initialize sql.js WebAssembly
           const sqlPromise = initSqlJs({
-            locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+            locateFile: (file) =>
+              `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`,
           });
-          
+
           const SQL = await sqlPromise;
           this.db = new SQL.Database();
 
-          // Create schema
           this.db.run(`
             CREATE TABLE tables (
               id TEXT PRIMARY KEY, 
-              label TEXT
+              label TEXT,
+              description TEXT,
+              is_custom INTEGER DEFAULT 0,
+              include_name INTEGER DEFAULT 1
             );
           `);
 
@@ -375,30 +673,46 @@
               tableid TEXT, 
               id TEXT, 
               label TEXT, 
+              description TEXT,
               joins TEXT,
               fieldtype TEXT
             );
           `);
 
-          // Create tableid index for efficient queries
-          this.db.run("CREATE INDEX idx_tablefields_tableid ON tablefields(tableid);");
-
-          // Start a transaction for bulk insert efficiency
+          this.db.run(
+            "CREATE INDEX idx_tablefields_tableid ON tablefields(tableid);",
+          );
           this.db.run("BEGIN TRANSACTION;");
 
-          // Insert Tables
-          const stmtTable = this.db.prepare("INSERT OR IGNORE INTO tables (id, label) VALUES (?, ?)");
+          const stmtTable = this.db.prepare(
+            "INSERT OR REPLACE INTO tables (id, label, description, is_custom, include_name) VALUES (?, ?, ?, ?, ?)",
+          );
           for (const t of tables) {
-            stmtTable.run([t.id, t.label || ""]);
+            stmtTable.run([
+              t.id,
+              t.label || "",
+              t.description || "",
+              t.is_custom || 0,
+              t.include_name !== undefined ? t.include_name : 1,
+            ]);
           }
           stmtTable.free();
 
-          // Insert Fields
-          const stmtField = this.db.prepare("INSERT INTO tablefields (tableid, id, label, joins, fieldtype) VALUES (?, ?, ?, ?, ?)");
+          const stmtField = this.db.prepare(
+            "INSERT INTO tablefields (tableid, id, label, description, joins, fieldtype) VALUES (?, ?, ?, ?, ?, ?)",
+          );
           for (const [tableId, tableData] of Object.entries(allFieldsObject)) {
             for (const f of tableData.fields) {
-              const joinsStr = f.joins && f.joins.length > 0 ? JSON.stringify(f.joins) : null;
-              stmtField.run([tableId, f.id, f.label || "", joinsStr, f.fieldType || ""]);
+              const joinsStr =
+                f.joins && f.joins.length > 0 ? JSON.stringify(f.joins) : null;
+              stmtField.run([
+                tableId,
+                f.id,
+                f.label || "",
+                f.description || "",
+                joinsStr,
+                f.fieldType || "",
+              ]);
             }
           }
           stmtField.free();
@@ -407,222 +721,638 @@
           this.incrementProgress();
         }
 
+        // --- Database Loader & Persistence Helpers ---
+
+        async loadExistingDatabase() {
+          const fileInput = document.getElementById("dbFileInput");
+
+          if (!this.fileHandle && !fileInput.files.length) {
+            alert("Please link or select an existing SQLite database file.");
+            throw new Error("No database selected.");
+          }
+
+          let fileData;
+          if (this.fileHandle) {
+            this.setStage("Reading Linked Database File", 1);
+            const file = await this.fileHandle.getFile();
+            fileData = new Uint8Array(await file.arrayBuffer());
+          } else {
+            this.setStage("Reading Uploaded Database File", 1);
+            fileData = await this.readFile(fileInput.files[0]);
+            this.downloadFilename = fileInput.files[0].name;
+          }
+
+          this.setStage("Initializing SQLite", 1);
+          const sqlPromise = initSqlJs({
+            locateFile: (file) =>
+              `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`,
+          });
+          const SQL = await sqlPromise;
+          this.db = new SQL.Database(fileData);
+          this.incrementProgress();
+
+          // Schema migrations to handle older DB versions
+          try {
+            this.db.run("ALTER TABLE tables ADD COLUMN description TEXT;");
+          } catch (e) {}
+          try {
+            this.db.run(
+              "ALTER TABLE tables ADD COLUMN is_custom INTEGER DEFAULT 0;",
+            );
+          } catch (e) {}
+          try {
+            this.db.run(
+              "ALTER TABLE tables ADD COLUMN include_name INTEGER DEFAULT 1;",
+            );
+          } catch (e) {}
+          try {
+            this.db.run("ALTER TABLE tablefields ADD COLUMN description TEXT;");
+          } catch (e) {}
+          try {
+            this.db.run("ALTER TABLE tablefields ADD COLUMN fieldtype TEXT;");
+          } catch (e) {}
+        }
+
+        async saveDatabaseInPlaceIfLinked() {
+          if (this.fileHandle) {
+            this.setStage("Writing changes directly to linked file...", 1);
+            try {
+              const writable = await this.fileHandle.createWritable();
+              await writable.write(this.db.export());
+              await writable.close();
+              this.incrementProgress();
+              return true;
+            } catch (writeErr) {
+              console.warn("Direct file write failed:", writeErr);
+              // Fallback: don't crash the entire flow; enable manual download button
+              this.ui.downloadBtn.disabled = false;
+              alert(
+                "Direct in-place save was blocked by the browser. You can still download the updated database using the Purple button.",
+              );
+              return false;
+            }
+          }
+          return true;
+        }
+
+        // --- Entry Points ---
+
         async startFull() {
-          const filenameInput = document.getElementById("outFilename").value.trim() || "netsuite_metadata";
+          const filenameInput =
+            document.getElementById("outFilename").value.trim() ||
+            "netsuite_metadata";
           this.downloadFilename = filenameInput + ".db";
 
-          this.setStage("Loading Tables", 0);
+          this.setStage("Loading Initial Table List", 0);
+          const allRecordTypes = await this.loadRecordTypes();
 
-          let tables = await this.loadRecordTypes();
-          const processedTableSet = new Set(tables.map((t) => t.id));
-          
+          const nativeTables = allRecordTypes.filter(
+            (t) => !t.id.startsWith("customrecord"),
+          );
+          const processedTableSet = new Set(nativeTables.map((t) => t.id));
+
           let allFieldsObject = {};
-          let currentBatch = tables;
+          let currentBatch = nativeTables;
           let iterationCount = 0;
+          let enrichedNativeTables = [];
 
+          // 1. Process Native Tables via Records Catalog
           while (currentBatch.length > 0) {
             iterationCount++;
-            
-            const stageName = iterationCount === 1 
-              ? "Loading Primary Table Fields" 
-              : `Loading Join Fields: Stage ${iterationCount - 1}`;
-              
-            console.log(`Iteration ${iterationCount}: Processing ${currentBatch.length} tables`);
+            const stageName =
+              iterationCount === 1
+                ? `Loading Native Table Details (${currentBatch.length} tables)`
+                : `Loading Native Join Details: Stage ${iterationCount - 1} (${currentBatch.length} tables)`;
+
             this.setStage(stageName, currentBatch.length);
 
-            const { tableFields, newJoinedTables } = await this.processBatch(
-              currentBatch,
-              processedTableSet
-            );
+            const { tableFields, tableDescriptions, newJoinedTables } =
+              await this.processBatch(currentBatch, processedTableSet);
 
-            tables = tables.concat(
-              newJoinedTables.map(({ id, label }) => ({ id, label }))
-            );
-            
+            currentBatch.forEach((t) => {
+              enrichedNativeTables.push({
+                id: t.id,
+                label: t.label || t.id,
+                description: tableDescriptions[t.id] || "",
+                is_custom: 0,
+                include_name: 1,
+              });
+            });
+
             currentBatch = newJoinedTables;
             allFieldsObject = { ...allFieldsObject, ...tableFields };
           }
 
-          // Build SQLite DB with the aggregated data
-          await this.generateSQLiteDatabase(tables, allFieldsObject);
+          // 2. Process Custom Records via Paged SuiteQL
+          const { customTables, customFieldsObject } =
+            await this.extractCustomRecordsWithSuiteQL();
+
+          const allTables = [...enrichedNativeTables, ...customTables];
+          const combinedFieldsObject = {
+            ...allFieldsObject,
+            ...customFieldsObject,
+          };
+
+          // 3. Build Database
+          await this.generateSQLiteDatabase(allTables, combinedFieldsObject);
+        }
+
+        async startCustomRecords() {
+          await this.loadExistingDatabase();
+
+          // 1. Extract fresh custom records and custom fields from NetSuite
+          const { customTables, customFieldsObject } =
+            await this.extractCustomRecordsWithSuiteQL();
+
+          this.setStage("Syncing Custom Records into Database", 1);
+
+          // 2. Identify existing custom tables to calculate stats (additions, removals, updates)
+          const existingRes = this.db.exec(
+            "SELECT LOWER(id) FROM tables WHERE is_custom = 1 OR LOWER(id) LIKE 'customrecord%'",
+          );
+          const existingCustomIds = new Set();
+          if (existingRes.length > 0 && existingRes[0].values) {
+            existingRes[0].values.forEach((row) =>
+              existingCustomIds.add(row[0]),
+            );
+          }
+
+          const currentCustomIds = new Set(
+            customTables.map((t) => t.id.toLowerCase()),
+          );
+
+          let removedCount = 0;
+          existingCustomIds.forEach((id) => {
+            if (!currentCustomIds.has(id)) removedCount++;
+          });
+
+          let addedCount = 0;
+          currentCustomIds.forEach((id) => {
+            if (!existingCustomIds.has(id)) addedCount++;
+          });
+
+          const updatedCount = customTables.length - addedCount;
+
+          // 3. Update Database inside an atomic transaction
+          this.db.run("BEGIN TRANSACTION;");
+
+          // Remove obsolete or modified custom table rows and their fields
+          this.db.run(
+            "DELETE FROM tablefields WHERE LOWER(tableid) IN (SELECT LOWER(id) FROM tables WHERE is_custom = 1 OR LOWER(id) LIKE 'customrecord%') OR LOWER(tableid) LIKE 'customrecord%';",
+          );
+          this.db.run(
+            "DELETE FROM tables WHERE is_custom = 1 OR LOWER(id) LIKE 'customrecord%';",
+          );
+
+          // Insert all current custom tables
+          const stmtTable = this.db.prepare(
+            "INSERT OR REPLACE INTO tables (id, label, description, is_custom, include_name) VALUES (?, ?, ?, ?, ?)",
+          );
+          for (const t of customTables) {
+            stmtTable.run([
+              t.id,
+              t.label || "",
+              t.description || "",
+              1,
+              t.include_name !== undefined ? t.include_name : 1,
+            ]);
+          }
+          stmtTable.free();
+
+          // Insert all current custom table fields
+          const stmtField = this.db.prepare(
+            "INSERT INTO tablefields (tableid, id, label, description, joins, fieldtype) VALUES (?, ?, ?, ?, ?, ?)",
+          );
+          for (const [tableId, tableData] of Object.entries(
+            customFieldsObject,
+          )) {
+            for (const f of tableData.fields) {
+              const joinsStr =
+                f.joins && f.joins.length > 0 ? JSON.stringify(f.joins) : null;
+              stmtField.run([
+                tableId,
+                f.id,
+                f.label || "",
+                f.description || "",
+                joinsStr,
+                f.fieldType || "",
+              ]);
+            }
+          }
+          stmtField.free();
+
+          this.db.run("COMMIT;");
+          this.incrementProgress();
+
+          const directSaved = await this.saveDatabaseInPlaceIfLinked();
+
+          return {
+            total: customTables.length,
+            added: addedCount,
+            updated: updatedCount,
+            removed: removedCount,
+            directSaved,
+          };
         }
 
         async startSingle() {
-            const fileInput = document.getElementById("dbFileInput");
-            const tableNameInput = document.getElementById("tableNameInput").value.trim().toLowerCase();
+          const tableNameInput = document
+            .getElementById("tableNameInput")
+            .value.trim()
+            .toLowerCase();
+          if (!tableNameInput) {
+            alert("Please provide a table name.");
+            throw new Error("No table name provided.");
+          }
 
-            if (!fileInput.files.length) {
-                alert("Please select an existing SQLite database file.");
-                throw new Error("No file selected.");
+          await this.loadExistingDatabase();
+
+          this.setStage(`Fetching metadata for table: ${tableNameInput}`, 1);
+
+          let tableLabel = tableNameInput;
+          let tableDescription = "";
+          let includeName = 1;
+          let fields = [];
+          const isCustom = tableNameInput.startsWith("customrecord") ? 1 : 0;
+
+          if (isCustom) {
+            const tRes = await this.runSuiteQL(`
+              SELECT ScriptID, Name, Description, IncludeName 
+              FROM CustomRecordType 
+              WHERE LOWER(ScriptID) = '${tableNameInput}'
+              ORDER BY ScriptID
+            `);
+
+            if (tRes && tRes.length > 0) {
+              tableLabel = tRes[0].name || tableNameInput;
+              tableDescription = tRes[0].description || "";
+              includeName = tRes[0].includename === "T" ? 1 : 0;
             }
-            if (!tableNameInput) {
-                alert("Please provide a table name.");
-                throw new Error("No table name provided.");
-            }
 
-            const file = fileInput.files[0];
-            this.downloadFilename = file.name; // Retain original file name
+            const fRes = await this.runSuiteQL(`
+              SELECT 
+                LOWER(cf.ScriptID)                  AS id, 
+                cf.Name                             AS label, 
+                cf.Description                      AS description, 
+                cf.FieldValueType                   AS fieldtype,
+                CASE 
+                  WHEN LOWER(cf.FieldValueType) IN ('list/record', 'multiple select') THEN 1 
+                  ELSE 0 
+                END                                 AS is_join,
+                LOWER(tgt.ScriptID)                 AS target_custom_table, 
+                BUILTIN.DF(cf.FieldValueTypeRecord) AS target_label
+              FROM CustomField cf
+              INNER JOIN CustomRecordType src ON cf.RecordType = src.InternalID
+              LEFT JOIN CustomRecordType tgt ON tgt.InternalID = cf.FieldValueTypeRecord
+              WHERE LOWER(src.ScriptID) = '${tableNameInput}'
+              ORDER BY cf.ScriptID
+            `);
 
-            this.setStage("Reading Database File", 1);
-            const fileData = await this.readFile(file);
-            
-            this.setStage("Initializing SQLite", 1);
-            const sqlPromise = initSqlJs({
-                locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+            const customFieldsFetched = fRes.map((cf) => {
+              const fieldId = (cf.id || "").toLowerCase();
+              const fType = (cf.fieldtype || "").toLowerCase();
+              const isListRecord = fType === "list/record";
+              const isMultiSelect = fType === "multiple select";
+              const isJoin = isListRecord || isMultiSelect;
+
+              let joinData = null;
+              if (isJoin) {
+                if (isMultiSelect) {
+                  const intermediateTable = `map_${tableNameInput}_${fieldId}`;
+                  joinData = [
+                    {
+                      id: intermediateTable,
+                      label: cf.target_label
+                        ? `Map (${cf.target_label})`
+                        : intermediateTable,
+                      joinPairs: [
+                        {
+                          id: "mapone",
+                          label: "Map One",
+                        },
+                      ],
+                    },
+                  ];
+                } else {
+                  const targetId =
+                    cf.target_custom_table ||
+                    (cf.target_label
+                      ? cf.target_label.toLowerCase().replace(/\s+/g, "_")
+                      : "");
+                  joinData = [
+                    {
+                      id: targetId,
+                      label: cf.target_label || "",
+                      joinPairs: [
+                        {
+                          id: "id",
+                          label: "Internal ID",
+                        },
+                      ],
+                    },
+                  ];
+                }
+              }
+
+              return {
+                id: fieldId,
+                label: cf.label || "",
+                description: cf.description || "",
+                fieldType: cf.fieldtype || "",
+                joins: joinData,
+              };
             });
-            const SQL = await sqlPromise;
-            this.db = new SQL.Database(fileData);
-            this.incrementProgress();
 
-            this.setStage(`Fetching metadata for table: ${tableNameInput}`, 1);
+            const baseFields = [
+              {
+                id: "id",
+                label: "Internal ID",
+                description: "Record internal identifier",
+                fieldType: "INTEGER",
+              },
+              {
+                id: "name",
+                label: "Name",
+                description: "Record name or number",
+                fieldType: "TEXT",
+              },
+              {
+                id: "isinactive",
+                label: "Inactive",
+                description: "Is record inactive",
+                fieldType: "CHECKBOX",
+              },
+              {
+                id: "created",
+                label: "Date Created",
+                description: "Timestamp created",
+                fieldType: "DATETIME",
+              },
+              {
+                id: "lastmodified",
+                label: "Last Modified",
+                description: "Timestamp last modified",
+                fieldType: "DATETIME",
+              },
+              {
+                id: "owner",
+                label: "Owner",
+                description: "Record owner",
+                fieldType: "SELECT",
+              },
+            ].filter((sf) => sf.id !== "name" || includeName === 1);
+
+            fields = [...baseFields, ...customFieldsFetched];
+          } else {
             const result = await this.loadTableDetail(tableNameInput);
-
             if (!result.success) {
-                alert(`Failed to load metadata for table ${tableNameInput}. Verify the table name.`);
-                throw new Error("Metadata fetch failed.");
+              alert(
+                `Failed to load metadata for table ${tableNameInput}. Verify the table name.`,
+              );
+              throw new Error("Metadata fetch failed.");
             }
+            tableDescription = result.description || "";
+            fields = result.fields;
+          }
 
-            this.setStage("Updating Database", 1);
-            this.db.run("BEGIN TRANSACTION;");
-            
-            // Upsert the table record
-            this.db.run("INSERT OR IGNORE INTO tables (id, label) VALUES (?, ?)", [tableNameInput, tableNameInput]);
-            
-            // Add column to tablefields if loading into an old db that might be missing it (fail gracefully if it exists)
-            try {
-                this.db.run("ALTER TABLE tablefields ADD COLUMN fieldtype TEXT;");
-            } catch (e) {
-                // Column likely already exists, ignore
-            }
+          this.setStage("Updating Database", 1);
+          this.db.run("BEGIN TRANSACTION;");
+          this.db.run(
+            "INSERT OR REPLACE INTO tables (id, label, description, is_custom, include_name) VALUES (?, ?, ?, ?, ?)",
+            [
+              tableNameInput,
+              tableLabel,
+              tableDescription,
+              isCustom,
+              includeName,
+            ],
+          );
+          this.db.run("DELETE FROM tablefields WHERE LOWER(tableid) = ?", [
+            tableNameInput,
+          ]);
 
-            // Delete existing fields for this table to prevent duplicates during UPSERT
-            this.db.run("DELETE FROM tablefields WHERE tableid = ?", [tableNameInput]);
+          const stmtField = this.db.prepare(
+            "INSERT INTO tablefields (tableid, id, label, description, joins, fieldtype) VALUES (?, ?, ?, ?, ?, ?)",
+          );
+          for (const f of fields) {
+            const joinsStr =
+              f.joins && f.joins.length > 0 ? JSON.stringify(f.joins) : null;
+            stmtField.run([
+              tableNameInput,
+              f.id,
+              f.label || "",
+              f.description || "",
+              joinsStr,
+              f.fieldType || "",
+            ]);
+          }
+          stmtField.free();
+          this.db.run("COMMIT;");
+          this.incrementProgress();
 
-            // Insert new fields
-            const stmtField = this.db.prepare("INSERT INTO tablefields (tableid, id, label, joins, fieldtype) VALUES (?, ?, ?, ?, ?)");
-            for (const f of result.fields) {
-                const joinsStr = f.joins && f.joins.length > 0 ? JSON.stringify(f.joins) : null;
-                stmtField.run([tableNameInput, f.id, f.label || "", joinsStr, f.fieldType || ""]);
-            }
-            stmtField.free();
-            this.db.run("COMMIT;");
-            
-            this.incrementProgress();
+          await this.saveDatabaseInPlaceIfLinked();
         }
 
         readFile(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = (e) => resolve(new Uint8Array(e.target.result));
-                reader.onerror = (e) => reject(e);
-                reader.readAsArrayBuffer(file);
-            });
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(new Uint8Array(e.target.result));
+            reader.onerror = (e) => reject(e);
+            reader.readAsArrayBuffer(file);
+          });
         }
 
         async start() {
-          this.init(); 
+          this.init();
           this.ui.downloadBtn.disabled = true;
-          
-          // Reset UI
           this.ui.bar.style.width = "0%";
           this.ui.bar.innerHTML = "0%";
           this.ui.status.innerHTML = "";
-          
-          const mode = document.querySelector('input[name="mode"]:checked').value;
+
+          // Verify write permission upfront while the user click token is active
+          if (this.fileHandle) {
+            try {
+              const perm = await this.fileHandle.queryPermission({
+                mode: "readwrite",
+              });
+              if (perm !== "granted") {
+                const req = await this.fileHandle.requestPermission({
+                  mode: "readwrite",
+                });
+                if (req !== "granted") {
+                  alert(
+                    "Write permission denied. Changes will not be saved in-place.",
+                  );
+                  this.fileHandle = null;
+                }
+              }
+            } catch (e) {
+              console.warn("Permission check error:", e);
+            }
+          }
+
+          const mode = document.querySelector(
+            'input[name="mode"]:checked',
+          ).value;
 
           try {
-            if (mode === 'full') {
-                await this.startFull();
+            if (mode === "full") {
+              await this.startFull();
+              this.setStage("Ready for Download", 0);
+              this.ui.downloadBtn.disabled = false;
+            } else if (mode === "custom_all") {
+              const stats = await this.startCustomRecords();
+              const summaryMsg = `Custom records sync complete! (${stats.total} total: ${stats.updated} updated, ${stats.added} added, ${stats.removed} removed)`;
+              if (this.fileHandle && stats.directSaved) {
+                this.setStage(
+                  `${summaryMsg} - Database file updated in-place successfully!`,
+                  0,
+                );
+              } else {
+                this.setStage(`${summaryMsg} - Ready for Download`, 0);
+                this.ui.downloadBtn.disabled = false;
+              }
             } else {
-                await this.startSingle();
+              await this.startSingle();
+              if (this.fileHandle) {
+                this.setStage(
+                  "Database file updated in-place successfully!",
+                  0,
+                );
+              } else {
+                this.setStage("Table updated! Ready for Download", 0);
+                this.ui.downloadBtn.disabled = false;
+              }
             }
-
-            this.setStage("Ready for Download", 0);
-            this.ui.downloadBtn.disabled = false;
           } catch (e) {
             console.error("Execution failed:", e);
-            this.setStage("Process Failed", 0);
+            this.setStage("Process Failed: " + (e.message || e), 0);
           }
         }
       }
 
-      // --- Global Functions for HTML Event Handlers ---
       const app = new SuiteQLMetadataLoader();
-
       function run() {
         app.start();
       }
-
       function downloadToFile() {
         if (!app.db) return;
-
-        // Export the database to a Uint8Array
         const data = app.db.export();
-        
-        // Create a blob and trigger download
         const blob = new Blob([data], { type: "application/octet-stream" });
         const url = URL.createObjectURL(blob);
-
         const a = document.createElement("a");
         a.href = url;
         a.download = app.downloadFilename;
         document.body.appendChild(a);
-        
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       }
-
       function toggleMode() {
         const mode = document.querySelector('input[name="mode"]:checked').value;
-        if (mode === 'full') {
-            document.getElementById('full-inputs').style.display = 'block';
-            document.getElementById('single-inputs').style.display = 'none';
-        } else {
-            document.getElementById('full-inputs').style.display = 'none';
-            document.getElementById('single-inputs').style.display = 'block';
-        }
+        document.getElementById("full-inputs").style.display =
+          mode === "full" ? "block" : "none";
+        document.getElementById("existing-db-inputs").style.display =
+          mode !== "full" ? "block" : "none";
+        document.getElementById("single-table-container").style.display =
+          mode === "single" ? "block" : "none";
       }
     </script>
   </head>
   <body>
     <div class="container">
       <h1 class="heading">MCP Schema Data</h1>
-      
-      <!-- Mode Selection -->
       <div class="mode-selector">
-        <label><input type="radio" name="mode" value="full" checked onchange="toggleMode()"> Full Schema Export</label>
-        <label><input type="radio" name="mode" value="single" onchange="toggleMode()"> Single Table Update</label>
+        <label
+          ><input
+            type="radio"
+            name="mode"
+            value="full"
+            checked
+            onchange="toggleMode()"
+          />
+          Full Schema Export</label
+        >
+        <label
+          ><input
+            type="radio"
+            name="mode"
+            value="custom_all"
+            onchange="toggleMode()"
+          />
+          Update All Custom Records</label
+        >
+        <label
+          ><input
+            type="radio"
+            name="mode"
+            value="single"
+            onchange="toggleMode()"
+          />
+          Single Table Update</label
+        >
       </div>
 
-      <!-- Full Schema Inputs -->
+      <!-- Full Export Inputs -->
       <div id="full-inputs" class="input-group">
         <label for="outFilename">Filename (without extension):</label>
         <div class="inline-input">
-            <input type="text" id="outFilename" placeholder="SB2" value="netsuite_metadata"> 
-            <strong>.db</strong>
+          <input
+            type="text"
+            id="outFilename"
+            placeholder="netsuite_metadata"
+            value="netsuite_metadata"
+          />
+          <strong>.db</strong>
         </div>
       </div>
 
-      <!-- Single Table Update Inputs -->
-      <div id="single-inputs" class="input-group" style="display: none;">
-        <label for="dbFileInput">Existing SQLite Database File:</label>
-        <input type="file" id="dbFileInput" accept=".db,.sqlite">
-        
-        <label for="tableNameInput">Table Name (to update/insert):</label>
-        <input type="text" id="tableNameInput" placeholder="e.g., transaction">
+      <!-- Existing DB Inputs (Shared for Custom All & Single Table) -->
+      <div id="existing-db-inputs" class="input-group" style="display: none">
+        <label>Target Database File:</label>
+        <button
+          type="button"
+          class="btn-secondary"
+          onclick="app.selectDatabaseInPlace()"
+        >
+          Select & Link Local File (Overwrites in-place)
+        </button>
+        <div
+          id="linkedFileLabel"
+          style="
+            font-size: 13px;
+            font-weight: bold;
+            margin-bottom: 12px;
+            color: #666;
+          "
+        >
+          No file linked yet (Optional)
+        </div>
+
+        <label for="dbFileInput"
+          >Or Choose File Manually (Downloads copy):</label
+        >
+        <input type="file" id="dbFileInput" accept=".db,.sqlite" />
+
+        <div id="single-table-container" style="display: none">
+          <label for="tableNameInput">Table Name (to update/insert):</label>
+          <input
+            type="text"
+            id="tableNameInput"
+            placeholder="e.g., transaction or customrecord_order_write_trans"
+          />
+        </div>
       </div>
-      
+
       <div>
-        <button class="run-button" type="button" onclick="run()">Run Extraction</button>
+        <button class="run-button" type="button" onclick="run()">
+          Run Extraction
+        </button>
       </div>
-      
+
       <h2 id="status">&nbsp;</h2>
-      
-      <div id="myProgress">
-        <div id="myBar">0%</div>
-      </div>
-      
+      <div id="myProgress"><div id="myBar">0%</div></div>
+
       <div class="action-buttons">
         <button
           id="downloadBtn"
