@@ -16,6 +16,9 @@ The server exposes the following MCP tools to interact directly with NetSuite:
 - **`loadRecordSample`**: Load a sample of a NetSuite record to inspect its data structure.
 - **`createCustomRecord`**: Programmatically create custom records in NetSuite.
 - **`createCustomList`**: Programmatically create custom lists in NetSuite.
+- **`netsuite_rebuild_vector_database`**: Asynchronously build or replace the LanceDB vector database (`.lance`) from the active environment's SQLite schema database (`.db`).
+- **`netsuite_rebuild_vector_database_status`**: Check the current status and progress of the vector database rebuild for the active environment.
+- **`netsuite_search_tables`**: Perform a semantic search against the vector database to discover relevant NetSuite tables and return the top 5 matches.
 
 ## Installation
 

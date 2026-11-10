@@ -7,6 +7,11 @@ import { loadRecordSampleTool } from "./loadRecordSample.js";
 import { createCustomRecordTool } from "./createCustomRecord.js";
 import { createCustomListTool } from "./createCustomList.js";
 import { updateCustomRecordTool } from "./updateCustomRecord.js";
+import {
+    rebuildVectorDatabaseTool,
+    rebuildVectorDatabaseStatusTool
+} from "./rebuildVectorDatabase.js";
+import { searchTablesTool } from "./searchTables.js";
 
 export const toolsRegistry = [
     getNetsuiteFieldsTool,
@@ -17,5 +22,8 @@ export const toolsRegistry = [
     loadRecordSampleTool,
     createCustomRecordTool,
     createCustomListTool,
-    updateCustomRecordTool
+    updateCustomRecordTool,
+    rebuildVectorDatabaseTool,
+    rebuildVectorDatabaseStatusTool,
+    searchTablesTool
 ];

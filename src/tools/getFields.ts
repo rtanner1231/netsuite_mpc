@@ -53,11 +53,26 @@ function formatApiFields(table_id: string, environment: string, fields: Netsuite
     return lines.join("\n");
 }
 
-function formatDbFields(table_id: string, environment: string, rows: any[]): string {
+function formatDbFields(table_id: string, environment: string, tableInfo: any | undefined, rows: any[]): string {
     const lines = [`Fields for '${table_id}' in ${environment}:`];
+    if (tableInfo) {
+        if (tableInfo.label) {
+            lines.push(`Table Label: ${tableInfo.label}`);
+        }
+        if (tableInfo.description) {
+            lines.push(`Table Description: ${String(tableInfo.description).replace(/\s+/g, " ").trim()}`);
+        }
+        if (tableInfo.is_custom !== undefined && tableInfo.is_custom !== null) {
+            lines.push(`Custom Record: ${tableInfo.is_custom ? "Yes" : "No"}`);
+        }
+        if (tableInfo.include_name !== undefined && tableInfo.include_name !== null) {
+            lines.push(`Include Name Field: ${tableInfo.include_name ? "Yes" : "No"}`);
+        }
+    }
     rows.forEach((row: any) => {
         const typeStr = row.fieldtype ? ` [Type: ${row.fieldtype}]` : "";
-        lines.push(`- ${row.id || "unknown_id"}${typeStr} (${row.label || "No Label"})`);
+        const descStr = row.description ? ` - ${String(row.description).replace(/\s+/g, " ").trim()}` : "";
+        lines.push(`- ${row.id || "unknown_id"}${typeStr} (${row.label || "No Label"})${descStr}`);
         if (row.joins) {
             try {
                 const parsedJoins = JSON.parse(row.joins);
@@ -79,7 +94,7 @@ function formatDbFields(table_id: string, environment: string, rows: any[]): str
     return lines.join("\n");
 }
 
-async function fetchFromDatabase(schemaPath: string, table_id: string): Promise<any[]> {
+async function fetchFromDatabase(schemaPath: string, table_id: string): Promise<{ tableInfo: any; rows: any[] }> {
     await fs.access(schemaPath);
     const db = await open({
         filename: schemaPath,
@@ -87,13 +102,20 @@ async function fetchFromDatabase(schemaPath: string, table_id: string): Promise<
         mode: sqlite3.OPEN_READONLY
     });
 
-    const rows = await db.all(
-        'SELECT id, label, joins, fieldtype FROM tablefields WHERE tableid = ?',
-        [table_id]
-    );
+    try {
+        const tableInfo = await db.get(
+            'SELECT id, label, description, is_custom, include_name FROM tables WHERE id = ?',
+            [table_id]
+        );
+        const rows = await db.all(
+            'SELECT id, label, description, joins, fieldtype FROM tablefields WHERE tableid = ?',
+            [table_id]
+        );
 
-    await db.close();
-    return rows;
+        return { tableInfo, rows };
+    } finally {
+        await db.close();
+    }
 }
 
 export const getNetsuiteFieldsTool: ToolDefinition = {
@@ -115,11 +137,14 @@ export const getNetsuiteFieldsTool: ToolDefinition = {
 
         const schemaPath = path.join(MCP_DIR, `${environment}.db`);
         let fallbackTriggered = useFallback || false;
+        let tableInfo: any = undefined;
         let rows: any[] = [];
 
         if (!fallbackTriggered) {
             try {
-                rows = await fetchFromDatabase(schemaPath, table_id);
+                const dbResult = await fetchFromDatabase(schemaPath, table_id);
+                tableInfo = dbResult.tableInfo;
+                rows = dbResult.rows;
                 if (!rows || rows.length === 0) {
                     fallbackTriggered = true;
                 }
@@ -143,6 +168,6 @@ export const getNetsuiteFieldsTool: ToolDefinition = {
             }
         }
 
-        return { content: [{ type: "text", text: formatDbFields(table_id, environment, rows) }] };
+        return { content: [{ type: "text", text: formatDbFields(table_id, environment, tableInfo, rows) }] };
     }
 };
