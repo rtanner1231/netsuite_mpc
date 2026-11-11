@@ -12,6 +12,7 @@ import {
     rebuildVectorDatabaseStatusTool
 } from "./rebuildVectorDatabase.js";
 import { searchTablesTool } from "./searchTables.js";
+import { getRelatedTablesTool } from "./getRelatedTables.js";
 
 export const toolsRegistry = [
     getNetsuiteFieldsTool,
@@ -25,5 +26,6 @@ export const toolsRegistry = [
     updateCustomRecordTool,
     rebuildVectorDatabaseTool,
     rebuildVectorDatabaseStatusTool,
-    searchTablesTool
+    searchTablesTool,
+    getRelatedTablesTool
 ];

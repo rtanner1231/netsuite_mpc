@@ -19,6 +19,7 @@ The server exposes the following MCP tools to interact directly with NetSuite:
 - **`netsuite_rebuild_vector_database`**: Asynchronously build or replace the LanceDB vector database (`.lance`) from the active environment's SQLite schema database (`.db`).
 - **`netsuite_rebuild_vector_database_status`**: Check the current status and progress of the vector database rebuild for the active environment.
 - **`netsuite_search_tables`**: Perform a semantic search against the vector database to discover relevant NetSuite tables and return the top 5 matches.
+- **`netsuite_get_related_tables`**: Build a map of related NetSuite tables starting from a given table ID by traversing field joins across hop levels.
 
 ## Installation
 
