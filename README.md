@@ -24,6 +24,8 @@ The server exposes the following MCP tools to interact directly with NetSuite:
 
 ## Installation
 
+### Local Server Setup
+
 1. **Clone the repository:**
    ```bash
    git clone <repository_url>
@@ -39,6 +41,46 @@ The server exposes the following MCP tools to interact directly with NetSuite:
    ```bash
    npm run build
    ```
+
+### Deploying the NetSuite RESTlet Backend (`netsuitescripts/rl_mcp_services.js`)
+
+Several MCP tools (`netsuite_run_suite_ql`, `netsuite_get_script_logs`, `netsuite_run_function`, and `netsuite_load_record_sample`) communicate with a SuiteScript 2.1 RESTlet included in this repository at `netsuitescripts/rl_mcp_services.js`. You must upload and deploy this script in each target NetSuite environment (e.g., Sandbox, Production).
+
+1. **Upload the Script File to the File Cabinet:**
+   - In NetSuite, navigate to **Documents > Files > SuiteScripts** (or a subfolder of your choice).
+   - Click **Add File** and upload `netsuitescripts/rl_mcp_services.js`.
+
+2. **Create the Script Record:**
+   - Navigate to **Customization > Scripting > Scripts > New**.
+   - Select the `rl_mcp_services.js` file you just uploaded and click **Create Script Record**.
+   - NetSuite will detect the `@NScriptType Restlet` and `@NApiVersion 2.1` annotations automatically and link the `post` entry point function (`post`).
+   - Set a descriptive **Name** (e.g., `MCP Services RESTlet`).
+   - *(Optional)* Enter a custom **ID** (for example, `_rl_mcp_services`, which NetSuite saves as `customscript_rl_mcp_services`).
+   - Click **Save and Deploy** (or click **Save** and then **Deploy Script**).
+
+3. **Create and Configure the Script Deployment:**
+   - On the **Script Deployment** page:
+     - **Status:** Change from *Testing* to **Released** so external RESTlet calls can reach it.
+     - **Log Level:** Set to **Debug** (or **Error** if you want minimal execution logs).
+     - *(Optional)* **ID:** Enter a custom deployment ID (for example, `_rl_mcp_services`, which NetSuite saves as `customdeploy_rl_mcp_services`).
+     - **Audience Subtab:** Select the **Roles** and/or **Employees** that will be used by your OAuth 1.0a Access Token (or check **Select All** under Roles/Employees if appropriate for your account).
+   - Click **Save**.
+
+4. **Record the `scriptId` and `deploymentId` for Configuration:**
+   - **Are specific Script or Deployment IDs required?**
+     **No.** Neither `rl_mcp_services.js` nor the MCP server hardcodes a specific Script ID or Deployment ID. Instead, the MCP server reads `scriptId` and `deploymentId` per environment from your `env.json` configuration file and builds the RESTlet URL dynamically:
+     ```text
+     https://<accountId>.restlets.api.netsuite.com/app/site/hosting/restlet.nl?script=<scriptId>&deploy=<deploymentId>
+     ```
+   - **Where to find the exact values:**
+     On the saved **Script Deployment** page in NetSuite, look at the **External URL** field:
+     ```text
+     https://<accountId>.restlets.api.netsuite.com/app/site/hosting/restlet.nl?script=1234&deploy=1
+     ```
+     - Copy the value after `script=` into `"scriptId"` in your `env.json`.
+     - Copy the value after `deploy=` into `"deploymentId"` in your `env.json`.
+   - **Numeric Internal IDs vs. Custom Script IDs:**
+     NetSuite's RESTlet endpoint accepts **either** the numeric internal IDs shown in the External URL (e.g., `"scriptId": "1234"`, `"deploymentId": "1"`) **or** the full custom script/deployment IDs (e.g., `"scriptId": "customscript_rl_mcp_services"`, `"deploymentId": "customdeploy_rl_mcp_services"`). Using custom IDs can be convenient if you want consistent IDs across Sandbox and Production environments.
 
 ## Configuration
 
