@@ -8,14 +8,15 @@ The NetSuite Model Context Protocol (MCP) Server is a powerful bridge that allow
 
 The server exposes the following MCP tools to interact directly with NetSuite:
 
-- **`getNetsuiteFields`**: Retrieve available fields for specific NetSuite record types.
-- **`runSuiteQl`**: Execute SuiteQL queries against your NetSuite instance.
-- **`getScriptLogs`**: Fetch and inspect execution logs for NetSuite scripts.
-- **`uploadFile`**: Upload files directly to the NetSuite File Cabinet.
-- **`runFunction`**: Execute custom NetSuite server-side functions/scripts.
-- **`loadRecordSample`**: Load a sample of a NetSuite record to inspect its data structure.
-- **`createCustomRecord`**: Programmatically create custom records in NetSuite.
-- **`createCustomList`**: Programmatically create custom lists in NetSuite.
+- **`netsuite_get_fields`**: Retrieve available fields for specific NetSuite record types.
+- **`netsuite_run_suite_ql`**: Execute SuiteQL queries against your NetSuite instance.
+- **`netsuite_get_script_logs`**: Fetch and inspect execution logs for NetSuite scripts.
+- **`netsuite_upload_file`**: Upload files directly to the NetSuite File Cabinet.
+- **`netsuite_run_function`**: Execute custom NetSuite server-side functions/scripts.
+- **`netsuite_load_record_sample`**: Load a sample of a NetSuite record to inspect its data structure.
+- **`netsuite_create_custom_record`**: Programmatically create custom records in NetSuite.
+- **`netsuite_update_custom_record`**: Programmatically update custom records in NetSuite.
+- **`netsuite_create_custom_list`**: Programmatically create custom lists in NetSuite.
 - **`netsuite_rebuild_vector_database`**: Asynchronously build or replace the LanceDB vector database (`.lance`) from the active environment's SQLite schema database (`.db`).
 - **`netsuite_rebuild_vector_database_status`**: Check the current status and progress of the vector database rebuild for the active environment.
 - **`netsuite_search_tables`**: Perform a semantic search against the vector database to discover relevant NetSuite tables and return the top 5 matches.
@@ -65,7 +66,7 @@ Create `state.json` in the configuration directory with the following structure:
 
 ### 2. The `env.json` File (⚠️ REQUIRED)
 
-This file stores your NetSuite credentials for one or more environments. Create `env.json` in the configuration directory:
+This file stores your NetSuite credentials for one or more environments. You can also optionally specify a `disabledTools` array on any environment to disable specific MCP tools when that environment is active. Create `env.json` in the configuration directory:
 
 ```json
 {
@@ -77,7 +78,13 @@ This file stores your NetSuite credentials for one or more environments. Create 
     "consumerKey": "YOUR_CONSUMER_KEY",
     "consumerSecret": "YOUR_CONSUMER_SECRET",
     "token": "YOUR_TOKEN",
-    "tokenSecret": "YOUR_TOKEN_SECRET"
+    "tokenSecret": "YOUR_TOKEN_SECRET",
+    "disabledTools": [
+      "netsuite_create_custom_record",
+      "netsuite_update_custom_record",
+      "netsuite_create_custom_list",
+      "netsuite_upload_file"
+    ]
   },
   "Sandbox": {
     "accountId": "YOUR_SB_ACCOUNT_ID",

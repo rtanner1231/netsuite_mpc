@@ -32,6 +32,47 @@ export const getActiveEnvironment = async (): Promise<string> => {
     }
 };
 
+export interface EnvironmentConfig {
+    accountId: string;
+    sdfId?: string;
+    scriptId: string;
+    deploymentId: string;
+    consumerKey: string;
+    consumerSecret: string;
+    token: string;
+    tokenSecret: string;
+    disabledTools?: string[];
+    [key: string]: any;
+}
+
+export const getEnvironmentConfig = async (environment?: string): Promise<{ environment: string; config: EnvironmentConfig }> => {
+    const activeEnv = environment ?? await getActiveEnvironment();
+
+    let envData: Record<string, EnvironmentConfig>;
+    try {
+        const envFile = await fs.readFile(ENV_PATH, "utf-8");
+        envData = JSON.parse(envFile);
+    } catch (error: any) {
+        throw new Error(`Failed to read env.json at ${ENV_PATH}: ${error.message}`);
+    }
+
+    const config = envData[activeEnv];
+    if (!config) {
+        throw new Error(`Credentials for environment '${activeEnv}' not found in env.json`);
+    }
+
+    return { environment: activeEnv, config };
+};
+
+export const getDisabledTools = async (): Promise<{ environment: string; disabledTools: Set<string> }> => {
+    const { environment, config } = await getEnvironmentConfig();
+    const rawDisabled = Array.isArray(config.disabledTools) ? config.disabledTools : [];
+    const disabledTools = new Set(
+        rawDisabled.filter((item): item is string => typeof item === "string")
+    );
+    return { environment, disabledTools };
+};
+
 /**
  * Get the user defaults for a specific type of object
  * return null if no defaults are found
