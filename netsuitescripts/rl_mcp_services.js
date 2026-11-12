@@ -18,6 +18,7 @@ define(["N/log", "N/query", "N/record", "N/search"], (
   // =========================================================================
   const MCP_ACTION = {
     SCRIPT_LOGS: "SCRIPT_LOGS",
+    SCRIPT_LOGS_BY_ID: "SCRIPT_LOGS_BY_ID",
     RUN_SUITE_QL: "RUN_SUITE_QL",
     RUN_FUNCTION: "RUN_FUNCTION",
     RECORD_SAMPLE: "RECORD_SAMPLE",
@@ -132,44 +133,53 @@ define(["N/log", "N/query", "N/record", "N/search"], (
       .replace(/\.ts$/, ".js");
   }
 
-  // =========================================================================
-  // ACTION HANDLERS
-  // =========================================================================
-
   /**
-   * ACTION: SCRIPT_LOGS
-   * Retrieves the latest 500 execution logs for a script associated with the given file.
+   * Resolves a target function from an exported module object, supporting dot-notation paths
+   * for nested objects (e.g., "__test.func1").
    *
-   * @param {Object} request
-   * @param {string} request.scriptFileName
-   * @returns {Object}
+   * @param {Object} mod
+   * @param {string} functionPath
+   * @returns {{ fn: Function, context: * } | null}
    */
-  function handleScriptLogs(request) {
-    if (!request.scriptFileName || typeof request.scriptFileName !== "string") {
-      return makeErrorResponse("No script file name provided");
+  function resolveTargetFunction(mod, functionPath) {
+    if (!mod || !functionPath || typeof functionPath !== "string") {
+      return null;
     }
 
-    const fileName = toJsExtension(request.scriptFileName);
+    const parts = functionPath.split(".");
+    if (parts.some((part) => !part)) {
+      return null;
+    }
 
-    const sql = `
-            SELECT
-                top 500
-                s.name AS script_name,
-                s.scripttype AS script_type,
-                n.title AS title,
-                n.detail AS detail,
-                n.type AS type,
-                TO_CHAR(n.date, 'YYYY-MM-DD HH24:MI:SS') AS full_date_time
-            FROM
-                script s
-                JOIN file f ON f.id = s.scriptfile
-                LEFT JOIN scriptnote n ON n.scripttype = s.id
-            WHERE
-                f.name = '${fileName}'
-            ORDER BY
-                n.date DESC
-        `;
+    let context = mod;
+    let target = mod;
 
+    for (const part of parts) {
+      if (
+        target == null ||
+        (typeof target !== "object" && typeof target !== "function")
+      ) {
+        return null;
+      }
+      context = target;
+      target = target[part];
+    }
+
+    if (typeof target !== "function") {
+      return null;
+    }
+
+    return { fn: target, context: context };
+  }
+
+  /**
+   * Executes a SuiteQL script-log query and formats the rows into the standard log response.
+   *
+   * @param {string} sql
+   * @param {string} notFoundMessage
+   * @returns {Object}
+   */
+  function queryAndFormatScriptLogs(sql, notFoundMessage) {
     let queryResults;
     try {
       queryResults = query.runSuiteQL({ query: sql }).asMappedResults();
@@ -179,7 +189,7 @@ define(["N/log", "N/query", "N/record", "N/search"], (
     }
 
     if (!queryResults || queryResults.length === 0) {
-      return makeErrorResponse("No script found for file");
+      return makeErrorResponse(notFoundMessage);
     }
 
     const firstRow = queryResults[0];
@@ -222,6 +232,107 @@ define(["N/log", "N/query", "N/record", "N/search"], (
       scriptType: scriptType,
       logs: logs,
     };
+  }
+
+  // =========================================================================
+  // ACTION HANDLERS
+  // =========================================================================
+
+  /**
+   * ACTION: SCRIPT_LOGS
+   * Retrieves the latest 500 execution logs for a script associated with the given file.
+   *
+   * @param {Object} request
+   * @param {string} request.scriptFileName
+   * @returns {Object}
+   */
+  function handleScriptLogs(request) {
+    if (!request.scriptFileName || typeof request.scriptFileName !== "string") {
+      return makeErrorResponse("No script file name provided");
+    }
+
+    const fileName = toJsExtension(request.scriptFileName).replace(/'/g, "''");
+
+    const sql = `
+            SELECT
+                top 500
+                s.name AS script_name,
+                s.scripttype AS script_type,
+                n.title AS title,
+                n.detail AS detail,
+                n.type AS type,
+                TO_CHAR(n.date, 'YYYY-MM-DD HH24:MI:SS') AS full_date_time
+            FROM
+                script s
+                JOIN file f ON f.id = s.scriptfile
+                LEFT JOIN scriptnote n ON n.scripttype = s.id
+            WHERE
+                f.name = '${fileName}'
+            ORDER BY
+                n.date DESC
+        `;
+
+    return queryAndFormatScriptLogs(sql, "No script found for file");
+  }
+
+  /**
+   * ACTION: SCRIPT_LOGS_BY_ID
+   * Retrieves the latest 500 execution logs for a script and deployment identified by scriptId and deploymentId.
+   * Supports both numeric internal/version IDs and custom script/deployment IDs.
+   *
+   * @param {Object} request
+   * @param {string|number} request.scriptId
+   * @param {string|number} request.deploymentId
+   * @returns {Object}
+   */
+  function handleScriptLogsById(request) {
+    const rawScriptId =
+      request.scriptId != null ? String(request.scriptId).trim() : "";
+    const rawDeploymentId =
+      request.deploymentId != null ? String(request.deploymentId).trim() : "";
+
+    if (!rawScriptId) {
+      return makeErrorResponse("No script ID provided");
+    }
+    if (!rawDeploymentId) {
+      return makeErrorResponse("No script deployment ID provided");
+    }
+
+    const escapedScriptId = rawScriptId.replace(/'/g, "''");
+    const escapedDeploymentId = rawDeploymentId.replace(/'/g, "''");
+
+    const scriptFilter = /^\d+$/.test(rawScriptId)
+      ? `s.id = ${Number(rawScriptId)}`
+      : `UPPER(s.scriptid) = UPPER('${escapedScriptId}')`;
+
+    const deploymentFilter = /^\d+$/.test(rawDeploymentId)
+      ? `(d.version = ${Number(rawDeploymentId)} OR d.primarykey = ${Number(rawDeploymentId)})`
+      : `UPPER(d.scriptid) = UPPER('${escapedDeploymentId}')`;
+
+    const sql = `
+            SELECT
+                top 500
+                s.name AS script_name,
+                s.scripttype AS script_type,
+                n.title AS title,
+                n.detail AS detail,
+                n.type AS type,
+                TO_CHAR(n.date, 'YYYY-MM-DD HH24:MI:SS') AS full_date_time
+            FROM
+                script s
+                JOIN scriptdeployment d ON d.script = s.id
+                LEFT JOIN scriptnote n ON n.scripttype = s.id
+            WHERE
+                ${scriptFilter}
+                AND ${deploymentFilter}
+            ORDER BY
+                n.date DESC
+        `;
+
+    return queryAndFormatScriptLogs(
+      sql,
+      "No script found for script ID and deployment ID",
+    );
   }
 
   /**
@@ -282,7 +393,8 @@ define(["N/log", "N/query", "N/record", "N/search"], (
       return makeErrorResponse(`Unable to load module ${targetPath}`);
     }
 
-    if (typeof mod[request.functionName] !== "function") {
+    const resolved = resolveTargetFunction(mod, request.functionName);
+    if (!resolved) {
       return makeErrorResponse(
         `Function ${request.functionName} not found in module ${targetPath}`,
       );
@@ -290,7 +402,7 @@ define(["N/log", "N/query", "N/record", "N/search"], (
 
     try {
       const timer = new ExecutionTimer();
-      const result = mod[request.functionName](...args);
+      const result = resolved.fn.apply(resolved.context, args);
       const timeElapsedMS = timer.elapsed;
 
       return {
@@ -386,6 +498,7 @@ define(["N/log", "N/query", "N/record", "N/search"], (
   // =========================================================================
   const ACTIONS = {
     [MCP_ACTION.SCRIPT_LOGS]: handleScriptLogs,
+    [MCP_ACTION.SCRIPT_LOGS_BY_ID]: handleScriptLogsById,
     [MCP_ACTION.RUN_SUITE_QL]: handleRunSuiteQL,
     [MCP_ACTION.RUN_FUNCTION]: handleRunFunction,
     [MCP_ACTION.RECORD_SAMPLE]: handleRecordSample,
