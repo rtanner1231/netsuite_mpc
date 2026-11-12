@@ -7,10 +7,11 @@
  * Provides endpoints for executing SuiteQL queries, retrieving script execution logs,
  * dynamically running SuiteScript functions, and inspecting record samples.
  */
-define(["N/log", "N/query", "N/record", "N/search"], (
+define(["N/log", "N/query", "N/record", "N/runtime", "N/search"], (
   log,
   query,
   record,
+  runtime,
   search,
 ) => {
   // =========================================================================
@@ -401,14 +402,18 @@ define(["N/log", "N/query", "N/record", "N/search"], (
     }
 
     try {
+      const script = runtime.getCurrentScript();
+      const startGovernance = script.getRemainingUsage();
       const timer = new ExecutionTimer();
       const result = resolved.fn.apply(resolved.context, args);
       const timeElapsedMS = timer.elapsed;
+      const governanceUsed = startGovernance - script.getRemainingUsage();
 
       return {
         success: true,
         result: result,
         timeElapsedMS: timeElapsedMS,
+        governanceUsed: governanceUsed,
       };
     } catch (e) {
       const errMsg = getErrorMessage(e);
