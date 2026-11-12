@@ -12,6 +12,10 @@ const execAsync = util.promisify(exec);
 export const uploadFileTool: ToolDefinition = {
     name: "netsuite_upload_file",
     description: "Uploads an array of specific script files to NetSuite using the SuiteCloud CLI.",
+    meta: {
+        isDestructive: true,
+        requiresSdf: true
+    },
     inputSchema: {
         type: "object",
         properties: { filePaths: { type: "array", items: { type: "string" } } },

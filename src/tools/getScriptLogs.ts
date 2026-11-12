@@ -4,6 +4,10 @@ import { callNetsuiteRestlet } from "../utils/api.js";
 export const getScriptLogsTool: ToolDefinition = {
     name: "netsuite_get_script_logs",
     description: "Retrieve the last 500 script logs for a specific NetSuite script.",
+    meta: {
+        isDestructive: false,
+        requiresSdf: false
+    },
     inputSchema: {
         type: "object",
         properties: { scriptFileName: { type: "string" } },

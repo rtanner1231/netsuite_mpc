@@ -108,7 +108,12 @@ Create `state.json` in the configuration directory with the following structure:
 
 ### 2. The `env.json` File (⚠️ REQUIRED)
 
-This file stores your NetSuite credentials for one or more environments. You can also optionally specify a `disabledTools` array on any environment to disable specific MCP tools when that environment is active. Create `env.json` in the configuration directory:
+This file stores your NetSuite credentials for one or more environments. You can also optionally configure a `tools` object on any environment to control which MCP tools are available when that environment is active:
+- **`disableDestructive`**: When `true`, disables all tools that can mutate NetSuite data or metadata (e.g., `netsuite_run_function`, `netsuite_upload_file`, `netsuite_create_custom_record`, `netsuite_update_custom_record`, `netsuite_create_custom_list`).
+- **`disableSdf`**: When `true`, disables all tools that require the SuiteCloud Development Framework (SDF) CLI. *(Note: SDF tools are also automatically disabled if `sdfId` is omitted or empty for the environment.)*
+- **`disabledTools`**: An optional array of specific tool names to disable individually.
+
+Create `env.json` in the configuration directory:
 
 ```json
 {
@@ -121,12 +126,13 @@ This file stores your NetSuite credentials for one or more environments. You can
     "consumerSecret": "YOUR_CONSUMER_SECRET",
     "token": "YOUR_TOKEN",
     "tokenSecret": "YOUR_TOKEN_SECRET",
-    "disabledTools": [
-      "netsuite_create_custom_record",
-      "netsuite_update_custom_record",
-      "netsuite_create_custom_list",
-      "netsuite_upload_file"
-    ]
+    "tools": {
+      "disableDestructive": true,
+      "disableSdf": true,
+      "disabledTools": [
+        "netsuite_rebuild_vector_database"
+      ]
+    }
   },
   "Sandbox": {
     "accountId": "YOUR_SB_ACCOUNT_ID",
@@ -154,6 +160,68 @@ You can optionally create a `config.json` file in the configuration directory to
   }
 }
 ```
+
+## Generating the SQLite Schema Database (`netsuitescripts/MCPSchemaLoad.html`)
+
+Tools such as `netsuite_get_fields`, `netsuite_get_related_tables`, `netsuite_rebuild_vector_database`, and `netsuite_search_tables` rely on a local SQLite schema database (`.db`) containing your NetSuite environment's native tables, custom records, fields, and join relationships.
+
+This repository includes a browser-based utility at `netsuitescripts/MCPSchemaLoad.html` that extracts this metadata directly from your NetSuite session and builds the SQLite database client-side.
+
+### 1. Hosting & Opening the Tool in NetSuite
+
+Because `MCPSchemaLoad.html` queries NetSuite's internal Records Catalog endpoint (`/app/recordscatalog/rcendpoint.nl`) and SuiteQL APIs using your active browser session, it must be opened from within NetSuite:
+
+1. In NetSuite, navigate to **Documents > Files > File Cabinet** (e.g., inside `SuiteScripts` or another folder of your choice).
+2. Click **Add File** and upload `netsuitescripts/MCPSchemaLoad.html`.
+3. Once uploaded, click on `MCPSchemaLoad.html` (or its **Preview** URL) in the File Cabinet to open the **MCP Schema Data** utility in a new browser tab.
+
+### 2. Required Filename and Location
+
+The MCP server looks for the SQLite file in your configuration directory (`MCP_DIR`) named after the active **environment key** configured in `state.json` and `env.json`:
+
+```text
+<config_directory>/<environment>.db
+```
+
+- **Directory Location:**
+  - **Windows:** `%APPDATA%\netsuite_mcp\`
+  - **macOS / Linux:** `~/.config/netsuite_mcp/` (or `$XDG_CONFIG_HOME/netsuite_mcp/`)
+- **Filename Requirement:**
+  - The filename **must exactly match** the environment name in `state.json` / `env.json` (including capitalization on case-sensitive filesystems) followed by `.db`.
+  - For example:
+    - If `"environment": "Prod"`, the file must be located at `~/.config/netsuite_mcp/Prod.db` (or `%APPDATA%\netsuite_mcp\Prod.db` on Windows).
+    - If `"environment": "Sandbox"`, the file must be located at `~/.config/netsuite_mcp/Sandbox.db` (or `%APPDATA%\netsuite_mcp\Sandbox.db` on Windows).
+
+### 3. Using the Extraction Modes
+
+`MCPSchemaLoad.html` provides three extraction modes depending on whether you are building a database for the first time or refreshing existing schema data:
+
+1. **Full Schema Export (Initial Setup):**
+   - Scrapes all native NetSuite record types and join metadata from the Records Catalog, then runs paginated SuiteQL queries to extract all Custom Record Types (`CustomRecordType`) and Custom Fields (`CustomField`).
+   - **How to run:**
+     1. Select **Full Schema Export**.
+     2. In **Filename (without extension)**, enter your target environment name (e.g., `Prod` or `Sandbox`) so that the output file is named `Prod.db` or `Sandbox.db`.
+     3. Click **Run Extraction** and wait for the progress bar to reach `100%` (*Ready for Download*).
+     4. Click **Download SQLite Database** and move the downloaded `<environment>.db` file into your `netsuite_mcp` configuration directory.
+
+2. **Update All Custom Records:**
+   - Refreshes all custom record types and custom fields in an existing `.db` file via SuiteQL without re-downloading all native NetSuite tables.
+   - **How to run:**
+     1. Select **Update All Custom Records**.
+     2. Provide your existing `<environment>.db` file using one of two methods:
+        - **Select & Link Local File (Overwrites in-place):** *(Supported in Chromium browsers such as Chrome and Edge)* Links directly to `~/.config/netsuite_mcp/<environment>.db` and overwrites it automatically when extraction completes.
+        - **Or Choose File Manually (Downloads copy):** Uploads your existing `.db` file into memory; when finished, click **Download SQLite Database** and replace your existing file in the configuration directory.
+     3. Click **Run Extraction**.
+
+3. **Single Table Update:**
+   - Re-fetches and updates a single native table or custom record (e.g., `transaction` or `customrecord_my_record`) inside an existing `.db` file.
+   - **How to run:**
+     1. Select **Single Table Update**.
+     2. Link your existing `<environment>.db` file (for in-place overwrite) or choose it manually.
+     3. Enter the script/table ID in **Table Name (to update/insert)**.
+     4. Click **Run Extraction** (and download the updated file if not linked in-place).
+
+> **Tip:** After generating or updating `<environment>.db`, run the `netsuite_rebuild_vector_database` MCP tool (and check progress with `netsuite_rebuild_vector_database_status`) to generate the corresponding `<environment>.lance` vector database used by `netsuite_search_tables`.
 
 ## NetSuite Setup Requirements
 

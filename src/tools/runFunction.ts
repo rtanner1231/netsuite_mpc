@@ -4,6 +4,10 @@ import { callNetsuiteRestlet } from "../utils/api.js";
 export const runFunctionTool: ToolDefinition = {
     name: "netsuite_run_function",
     description: "Run a specific function from a module in NetSuite and return the execution result.",
+    meta: {
+        isDestructive: true,
+        requiresSdf: false
+    },
     inputSchema: {
         type: "object",
         properties: {

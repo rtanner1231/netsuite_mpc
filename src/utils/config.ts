@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { ToolDefinition } from "../types/index.js";
 
 export const getConfigDir = (): string => {
     const appName = "netsuite_mcp";
@@ -32,6 +33,12 @@ export const getActiveEnvironment = async (): Promise<string> => {
     }
 };
 
+export interface EnvironmentToolsConfig {
+    disableDestructive?: boolean;
+    disableSdf?: boolean;
+    disabledTools?: string[];
+}
+
 export interface EnvironmentConfig {
     accountId: string;
     sdfId?: string;
@@ -41,7 +48,7 @@ export interface EnvironmentConfig {
     consumerSecret: string;
     token: string;
     tokenSecret: string;
-    disabledTools?: string[];
+    tools?: EnvironmentToolsConfig;
     [key: string]: any;
 }
 
@@ -64,13 +71,27 @@ export const getEnvironmentConfig = async (environment?: string): Promise<{ envi
     return { environment: activeEnv, config };
 };
 
-export const getDisabledTools = async (): Promise<{ environment: string; disabledTools: Set<string> }> => {
-    const { environment, config } = await getEnvironmentConfig();
-    const rawDisabled = Array.isArray(config.disabledTools) ? config.disabledTools : [];
-    const disabledTools = new Set(
-        rawDisabled.filter((item): item is string => typeof item === "string")
-    );
-    return { environment, disabledTools };
+export const getToolDisableReason = (tool: ToolDefinition, config: EnvironmentConfig): string | null => {
+    const toolsConfig = config.tools;
+    const rawDisabled = Array.isArray(toolsConfig?.disabledTools) ? toolsConfig.disabledTools : [];
+    if (rawDisabled.some((item): item is string => typeof item === "string" && item === tool.name)) {
+        return "explicitly listed in tools.disabledTools";
+    }
+
+    if (tool.meta.isDestructive && toolsConfig?.disableDestructive === true) {
+        return "destructive tools are disabled";
+    }
+
+    if (tool.meta.requiresSdf) {
+        if (toolsConfig?.disableSdf === true) {
+            return "SDF tools are disabled";
+        }
+        if (typeof config.sdfId !== "string" || config.sdfId.trim() === "") {
+            return "sdfId is not configured";
+        }
+    }
+
+    return null;
 };
 
 /**

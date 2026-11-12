@@ -277,6 +277,10 @@ function startBackgroundRebuild(
 export const rebuildVectorDatabaseTool: ToolDefinition = {
     name: "netsuite_rebuild_vector_database",
     description: "Asynchronously builds or replaces the vector database from the active NetSuite environment's schema database for semantic table discovery. Use 'netsuite_rebuild_vector_database_status' to check progress.",
+    meta: {
+        isDestructive: false,
+        requiresSdf: false
+    },
     inputSchema: {
         type: "object",
         properties: {}
@@ -334,6 +338,10 @@ export const rebuildVectorDatabaseTool: ToolDefinition = {
 export const rebuildVectorDatabaseStatusTool: ToolDefinition = {
     name: "netsuite_rebuild_vector_database_status",
     description: "Checks the status and progress of the vector database rebuild for the active NetSuite environment.",
+    meta: {
+        isDestructive: false,
+        requiresSdf: false
+    },
     inputSchema: {
         type: "object",
         properties: {}

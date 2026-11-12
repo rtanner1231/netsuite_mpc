@@ -333,6 +333,10 @@ export const getRelatedTablesTool: ToolDefinition = {
     name: "netsuite_get_related_tables",
     description:
         "Builds a map of related NetSuite tables starting from a specific table ID by traversing field joins across hop levels.",
+    meta: {
+        isDestructive: false,
+        requiresSdf: false
+    },
     inputSchema: {
         type: "object",
         properties: {

@@ -66,6 +66,10 @@ function formatSearchResults(query: string, environment: string, results: any[])
 export const searchTablesTool: ToolDefinition = {
     name: "netsuite_search_tables",
     description: "Performs a semantic search against the NetSuite vector database and returns the top 5 matching tables.",
+    meta: {
+        isDestructive: false,
+        requiresSdf: false
+    },
     inputSchema: {
         type: "object",
         properties: {

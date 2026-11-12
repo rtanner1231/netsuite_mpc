@@ -4,6 +4,10 @@ import { callNetsuiteRestlet } from "../utils/api.js";
 export const runSuiteQlTool: ToolDefinition = {
     name: "netsuite_run_suite_ql",
     description: "Run a SuiteQL query within NetSuite and return the results or error message.",
+    meta: {
+        isDestructive: false,
+        requiresSdf: false
+    },
     inputSchema: {
         type: "object",
         properties: { query: { type: "string" } },

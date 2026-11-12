@@ -16,6 +16,10 @@ type RecordUpdateCustomRecord = {
 export const updateCustomRecordTool: ToolDefinition = {
     name: "netsuite_update_custom_record",
     description: "Updates and deploys an existing Custom Record Type in NetSuite via SDF. Allows modifying header values and adding new fields.",
+    meta: {
+        isDestructive: true,
+        requiresSdf: true
+    },
     inputSchema: {
         type: "object",
         properties: {

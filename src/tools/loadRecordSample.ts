@@ -4,6 +4,10 @@ import { callNetsuiteRestlet } from "../utils/api.js";
 export const loadRecordSampleTool: ToolDefinition = {
     name: "netsuite_load_record_sample",
     description: "Loads a full NetSuite record as JSON to inspect its fields and sublist structure.",
+    meta: {
+        isDestructive: false,
+        requiresSdf: false
+    },
     inputSchema: {
         type: "object",
         properties: {

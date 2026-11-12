@@ -121,6 +121,10 @@ async function fetchFromDatabase(schemaPath: string, table_id: string): Promise<
 export const getNetsuiteFieldsTool: ToolDefinition = {
     name: "netsuite_get_fields",
     description: "Retrieve field definitions for a specific NetSuite table based on the locally configured environment.",
+    meta: {
+        isDestructive: false,
+        requiresSdf: false
+    },
     inputSchema: {
         type: "object",
         properties: { 

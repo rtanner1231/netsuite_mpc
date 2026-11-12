@@ -2,7 +2,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { toolsRegistry } from "./tools/index.js";
-import { getDisabledTools } from "./utils/config.js";
+import { EnvironmentConfig, getEnvironmentConfig, getToolDisableReason } from "./utils/config.js";
 
 const server = new Server(
     { name: "NetSuite Schema Provider TS", version: "1.0.0" },
@@ -11,16 +11,16 @@ const server = new Server(
 
 // Register tools to MCP
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-    let disabledTools = new Set<string>();
+    let config: EnvironmentConfig | null = null;
     try {
-        ({ disabledTools } = await getDisabledTools());
+        ({ config } = await getEnvironmentConfig());
     } catch (error: any) {
-        console.error(`Warning: Could not load disabledTools for ListTools: ${error.message}`);
+        console.error(`Warning: Could not load environment config for ListTools: ${error.message}`);
     }
 
     return {
         tools: toolsRegistry
-            .filter(tool => !disabledTools.has(tool.name))
+            .filter(tool => !config || getToolDisableReason(tool, config) === null)
             .map(tool => ({
                 name: tool.name,
                 description: tool.description,
@@ -38,10 +38,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     try {
-        const { environment, disabledTools } = await getDisabledTools();
-        if (disabledTools.has(requestedTool.name)) {
+        const { environment, config } = await getEnvironmentConfig();
+        const disableReason = getToolDisableReason(requestedTool, config);
+        if (disableReason) {
             return {
-                content: [{ type: "text", text: `Tool '${requestedTool.name}' is disabled in the '${environment}' environment.` }],
+                content: [{ type: "text", text: `Tool '${requestedTool.name}' is disabled in the '${environment}' environment (${disableReason}).` }],
                 isError: true
             };
         }
