@@ -24,12 +24,33 @@ export const getActiveEnvironment = async (): Promise<string> => {
         const fileData = await fs.readFile(CONFIG_PATH, "utf-8");
         const configData = JSON.parse(fileData);
 
+        if (typeof configData?.environment !== "string" || configData.environment.trim() === "") {
+            throw new Error(`'environment' is not set in ${CONFIG_PATH}. Use 'netsuite_switch_environment' to select an environment.`);
+        }
+
         return configData.environment;
     } catch (error: any) {
         if (error.code === "ENOENT") {
-            throw new Error(`state file not found at ${CONFIG_PATH}. Please create it with {"environment": "Prod"}.`);
+            throw new Error(`state file not found at ${CONFIG_PATH}. Use 'netsuite_switch_environment' to initialize it or create it with {"environment": "Prod"}.`);
         }
-        throw new Error(`Failed to read config.json: ${error.message}`);
+        throw new Error(`Failed to read state.json: ${error.message}`);
+    }
+};
+
+export const getActiveEnvironmentOrNull = async (): Promise<string | null> => {
+    try {
+        const fileData = await fs.readFile(CONFIG_PATH, "utf-8");
+        const configData = JSON.parse(fileData);
+
+        if (typeof configData?.environment === "string" && configData.environment.trim() !== "") {
+            return configData.environment;
+        }
+        return null;
+    } catch (error: any) {
+        if (error.code === "ENOENT") {
+            return null;
+        }
+        throw new Error(`Failed to read state.json: ${error.message}`);
     }
 };
 
@@ -52,16 +73,58 @@ export interface EnvironmentConfig {
     [key: string]: any;
 }
 
-export const getEnvironmentConfig = async (environment?: string): Promise<{ environment: string; config: EnvironmentConfig }> => {
-    const activeEnv = environment ?? await getActiveEnvironment();
-
-    let envData: Record<string, EnvironmentConfig>;
+export const getAllEnvironments = async (): Promise<Record<string, EnvironmentConfig>> => {
     try {
         const envFile = await fs.readFile(ENV_PATH, "utf-8");
-        envData = JSON.parse(envFile);
+        const parsed = JSON.parse(envFile);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("env.json must contain a top-level JSON object mapping environment names to configurations.");
+        }
+        return parsed as Record<string, EnvironmentConfig>;
     } catch (error: any) {
         throw new Error(`Failed to read env.json at ${ENV_PATH}: ${error.message}`);
     }
+};
+
+export const setActiveEnvironment = async (environment: string): Promise<{ previousEnvironment: string | null; environment: string }> => {
+    const envData = await getAllEnvironments();
+    if (!envData[environment]) {
+        const available = Object.keys(envData);
+        const availableList = available.length > 0 ? available.join(", ") : "none";
+        throw new Error(`Environment '${environment}' not found in env.json. Available environments: ${availableList}`);
+    }
+
+    let existingState: Record<string, any> = {};
+    let previousEnvironment: string | null = null;
+
+    try {
+        const fileData = await fs.readFile(CONFIG_PATH, "utf-8");
+        const parsed = JSON.parse(fileData);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            existingState = parsed;
+            if (typeof parsed.environment === "string" && parsed.environment.trim() !== "") {
+                previousEnvironment = parsed.environment;
+            }
+        }
+    } catch (error: any) {
+        if (error.code !== "ENOENT") {
+            throw new Error(`Failed to read existing state.json at ${CONFIG_PATH}: ${error.message}`);
+        }
+    }
+
+    await fs.mkdir(MCP_DIR, { recursive: true });
+    const updatedState = {
+        ...existingState,
+        environment
+    };
+    await fs.writeFile(CONFIG_PATH, JSON.stringify(updatedState, null, 2) + "\n", "utf-8");
+
+    return { previousEnvironment, environment };
+};
+
+export const getEnvironmentConfig = async (environment?: string): Promise<{ environment: string; config: EnvironmentConfig }> => {
+    const activeEnv = environment ?? await getActiveEnvironment();
+    const envData = await getAllEnvironments();
 
     const config = envData[activeEnv];
     if (!config) {
@@ -72,6 +135,10 @@ export const getEnvironmentConfig = async (environment?: string): Promise<{ envi
 };
 
 export const getToolDisableReason = (tool: ToolDefinition, config: EnvironmentConfig): string | null => {
+    if (tool.meta.alwaysAvailable) {
+        return null;
+    }
+
     const toolsConfig = config.tools;
     const rawDisabled = Array.isArray(toolsConfig?.disabledTools) ? toolsConfig.disabledTools : [];
     if (rawDisabled.some((item): item is string => typeof item === "string" && item === tool.name)) {

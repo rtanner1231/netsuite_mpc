@@ -14,8 +14,12 @@ import {
 } from "./rebuildVectorDatabase.js";
 import { searchTablesTool } from "./searchTables.js";
 import { getRelatedTablesTool } from "./getRelatedTables.js";
+import { listEnvironmentsTool } from "./listEnvironments.js";
+import { switchEnvironmentTool } from "./switchEnvironment.js";
 
 export const toolsRegistry = [
+    listEnvironmentsTool,
+    switchEnvironmentTool,
     getNetsuiteFieldsTool,
     runSuiteQlTool,
     getScriptLogsTool,

@@ -6,7 +6,7 @@ import { EnvironmentConfig, getEnvironmentConfig, getToolDisableReason } from ".
 
 const server = new Server(
     { name: "NetSuite Schema Provider TS", version: "1.0.0" },
-    { capabilities: { tools: {} } }
+    { capabilities: { tools: { listChanged: true } } }
 );
 
 // Register tools to MCP
@@ -20,7 +20,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
     return {
         tools: toolsRegistry
-            .filter(tool => !config || getToolDisableReason(tool, config) === null)
+            .filter(tool => config
+                ? getToolDisableReason(tool, config) === null
+                : tool.meta.alwaysAvailable === true
+            )
             .map(tool => ({
                 name: tool.name,
                 description: tool.description,
@@ -38,13 +41,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     try {
-        const { environment, config } = await getEnvironmentConfig();
-        const disableReason = getToolDisableReason(requestedTool, config);
-        if (disableReason) {
-            return {
-                content: [{ type: "text", text: `Tool '${requestedTool.name}' is disabled in the '${environment}' environment (${disableReason}).` }],
-                isError: true
-            };
+        if (!requestedTool.meta.alwaysAvailable) {
+            const { environment, config } = await getEnvironmentConfig();
+            const disableReason = getToolDisableReason(requestedTool, config);
+            if (disableReason) {
+                return {
+                    content: [{ type: "text", text: `Tool '${requestedTool.name}' is disabled in the '${environment}' environment (${disableReason}).` }],
+                    isError: true
+                };
+            }
         }
 
         // Pass arguments and the server instance (for things like getProjectRoot)

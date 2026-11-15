@@ -3,6 +3,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 export interface ToolMetadata {
     isDestructive: boolean;
     requiresSdf: boolean;
+    alwaysAvailable?: boolean;
 }
 
 export interface ToolDefinition {

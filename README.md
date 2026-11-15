@@ -8,6 +8,8 @@ The NetSuite Model Context Protocol (MCP) Server is a powerful bridge that allow
 
 The server exposes the following MCP tools to interact directly with NetSuite:
 
+- **`netsuite_list_environments`**: List all configured NetSuite environments from `env.json` and indicate which environment is currently active.
+- **`netsuite_switch_environment`**: Switch the active NetSuite environment by updating (or initializing) `state.json` and notify the MCP client that available tools may have changed.
 - **`netsuite_get_fields`**: Retrieve available fields for specific NetSuite record types.
 - **`netsuite_run_suite_ql`**: Execute SuiteQL queries against your NetSuite instance.
 - **`netsuite_get_script_logs`**: Fetch and inspect execution logs for NetSuite scripts.
@@ -92,13 +94,13 @@ The NetSuite MCP Server uses configuration files stored in your operating system
 
 You will need to manually set up the files in this directory before running the server.
 
-### 1. The `state.json` File (⚠️ REQUIRED)
+### 1. The `state.json` File
 
-**Important:** The `state.json` file **must be created by you (the user)**. This file acts as a switch to determine which NetSuite environment you are currently targeting (e.g., Sandbox, Production). 
+The `state.json` file acts as a switch to determine which NetSuite environment you are currently targeting (e.g., Sandbox, Production).
 
-**You are responsible for changing this file whenever you want to point the MCP server to a different NetSuite environment.**
+You can either create this file manually or let the MCP server initialize and update it using the **`netsuite_switch_environment`** tool (if `state.json` does not exist yet, only `netsuite_list_environments` and `netsuite_switch_environment` will be exposed until an environment is selected).
 
-Create `state.json` in the configuration directory with the following structure:
+To create `state.json` manually in the configuration directory, use the following structure:
 
 ```json
 {
