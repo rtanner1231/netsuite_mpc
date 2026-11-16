@@ -23,11 +23,12 @@ The server exposes the following MCP tools to interact directly with NetSuite, o
 - **`netsuite_rebuild_vector_database`**: Asynchronously build or replace the local LanceDB vector database (`<environment>.lance`) from the active environment's SQLite schema database (`<environment>.db`), indexing table and field metadata into embeddings for `netsuite_search_tables`.
 - **`netsuite_rebuild_vector_database_status`**: Check the status and progress of the vector database rebuild for the active environment, including the current phase (loading schema, generating embeddings, writing database), indexed table counts, elapsed time, or whether an existing vector database is ready on disk.
 
-### 3. Data Querying & Record Inspection
+### 3. Data Querying & Record Operations
 *(Requires the MCP RESTlet deployed in NetSuite)*
 
 - **`netsuite_run_suite_ql`**: Execute SuiteQL queries against your NetSuite instance via the MCP RESTlet and return mapped result rows along with the execution duration (`timeElapsedMS`).
 - **`netsuite_load_record_sample`**: Load a full NetSuite record in dynamic mode (`record.load`) as JSON to inspect its body fields and sublist structure. Accepts a `record_type` and an optional `id`—if `id` is omitted, it automatically searches for and samples the most recently created record of that type.
+- **`netsuite_create_record`** *(Destructive)*: Create a new NetSuite record in dynamic mode (`record.create`) for a given `table_id` and set an array of body `fields` (`{ fieldId, value }`), returning the saved internal `recordId`, elapsed time (`timeElapsedMS`), and governance units used (`governanceUsed`). Automatically converts ISO date/datetime strings to JavaScript `Date` objects for date fields.
 
 ### 4. Script Execution & Log Inspection
 *(Requires the MCP RESTlet deployed in NetSuite)*
@@ -66,7 +67,7 @@ The server exposes the following MCP tools to interact directly with NetSuite, o
 
 ### Deploying the NetSuite RESTlet Backend (`netsuitescripts/rl_mcp_services.js`)
 
-Several MCP tools (`netsuite_run_suite_ql`, `netsuite_get_script_logs`, `netsuite_run_function`, and `netsuite_load_record_sample`) communicate with a SuiteScript 2.1 RESTlet included in this repository at `netsuitescripts/rl_mcp_services.js`. You must upload and deploy this script in each target NetSuite environment (e.g., Sandbox, Production).
+Several MCP tools (`netsuite_run_suite_ql`, `netsuite_get_script_logs`, `netsuite_run_function`, `netsuite_load_record_sample`, and `netsuite_create_record`) communicate with a SuiteScript 2.1 RESTlet included in this repository at `netsuitescripts/rl_mcp_services.js`. You must upload and deploy this script in each target NetSuite environment (e.g., Sandbox, Production).
 
 1. **Upload the Script File to the File Cabinet:**
    - In NetSuite, navigate to **Documents > Files > SuiteScripts** (or a subfolder of your choice).
@@ -131,7 +132,7 @@ To create `state.json` manually in the configuration directory, use the followin
 ### 2. The `env.json` File (⚠️ REQUIRED)
 
 This file stores your NetSuite credentials for one or more environments. You can also optionally configure a `tools` object on any environment to control which MCP tools are available when that environment is active:
-- **`disableDestructive`**: When `true`, disables all tools that can mutate NetSuite data or metadata (e.g., `netsuite_run_function`, `netsuite_upload_file`, `netsuite_create_custom_record`, `netsuite_update_custom_record`, `netsuite_create_custom_list`).
+- **`disableDestructive`**: When `true`, disables all tools that can mutate NetSuite data or metadata (e.g., `netsuite_create_record`, `netsuite_run_function`, `netsuite_upload_file`, `netsuite_create_custom_record`, `netsuite_update_custom_record`, `netsuite_create_custom_list`).
 - **`disableSdf`**: When `true`, disables all tools that require the SuiteCloud Development Framework (SDF) CLI. *(Note: SDF tools are also automatically disabled if `sdfId` is omitted or empty for the environment.)*
 - **`disabledTools`**: An optional array of specific tool names to disable individually.
 

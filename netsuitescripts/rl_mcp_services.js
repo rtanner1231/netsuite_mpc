@@ -23,6 +23,7 @@ define(["N/log", "N/query", "N/record", "N/runtime", "N/search"], (
     RUN_SUITE_QL: "RUN_SUITE_QL",
     RUN_FUNCTION: "RUN_FUNCTION",
     RECORD_SAMPLE: "RECORD_SAMPLE",
+    CREATE_RECORD: "CREATE_RECORD",
   };
 
   // =========================================================================
@@ -498,6 +499,181 @@ define(["N/log", "N/query", "N/record", "N/runtime", "N/search"], (
     }
   }
 
+  /**
+   * Parses an ISO date or datetime string into a JavaScript Date object.
+   * Returns null if the string does not match an ISO date format or is invalid.
+   *
+   * @param {string} str
+   * @returns {Date|null}
+   */
+  function parseIsoDateString(str) {
+    if (typeof str !== "string") return null;
+    const trimmed = str.trim();
+
+    // Match YYYY-MM-DD using local calendar components to avoid UTC day-shift
+    const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+    if (dateOnlyMatch) {
+      const year = Number(dateOnlyMatch[1]);
+      const monthIndex = Number(dateOnlyMatch[2]) - 1;
+      const day = Number(dateOnlyMatch[3]);
+      const dateObj = new Date(year, monthIndex, day);
+      if (
+        !isNaN(dateObj.getTime()) &&
+        dateObj.getFullYear() === year &&
+        dateObj.getMonth() === monthIndex &&
+        dateObj.getDate() === day
+      ) {
+        return dateObj;
+      }
+      return null;
+    }
+
+    // Match ISO datetime strings (e.g. YYYY-MM-DDTHH:mm:ss...)
+    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(trimmed)) {
+      const dateObj = new Date(trimmed);
+      if (!isNaN(dateObj.getTime())) {
+        return dateObj;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Normalizes a field value prior to calling recordObj.setValue, converting
+   * ISO date strings to Date instances when the target NetSuite field is a date/datetime field.
+   *
+   * @param {Object} recordObj
+   * @param {string} fieldId
+   * @param {*} value
+   * @returns {*}
+   */
+  function normalizeFieldValue(recordObj, fieldId, value) {
+    if (typeof value !== "string") {
+      return value;
+    }
+
+    try {
+      const fieldObj = recordObj.getField({ fieldId: fieldId });
+      if (fieldObj && fieldObj.type) {
+        const fieldType = String(fieldObj.type).toLowerCase();
+        if (fieldType === "date" || fieldType === "datetimetz" || fieldType === "datetime") {
+          const parsedDate = parseIsoDateString(value);
+          if (parsedDate) {
+            return parsedDate;
+          }
+        }
+      }
+    } catch {
+      // Ignore getField lookup errors and fall back to raw value / retry
+    }
+
+    return value;
+  }
+
+  /**
+   * ACTION: CREATE_RECORD
+   * Creates a new NetSuite record in dynamic mode, sets the specified body fields, and saves it.
+   *
+   * @param {Object} request
+   * @param {string} [request.recordType]
+   * @param {string} [request.tableId]
+   * @param {Array<{ fieldId: string, value: * }>} request.fields
+   * @returns {Object}
+   */
+  function handleCreateRecord(request) {
+    const rawRecordType =
+      typeof request.recordType === "string" && request.recordType.trim()
+        ? request.recordType.trim()
+        : typeof request.tableId === "string" && request.tableId.trim()
+          ? request.tableId.trim()
+          : "";
+
+    if (!rawRecordType) {
+      return makeErrorResponse('Missing or invalid "recordType" (or "tableId")');
+    }
+
+    if (!Array.isArray(request.fields)) {
+      return makeErrorResponse('Missing or invalid "fields": expected an array of { fieldId, value } objects');
+    }
+
+    for (let i = 0; i < request.fields.length; i++) {
+      const entry = request.fields[i];
+      if (
+        !entry ||
+        typeof entry !== "object" ||
+        typeof entry.fieldId !== "string" ||
+        !entry.fieldId.trim()
+      ) {
+        return makeErrorResponse(
+          `Invalid field entry at index ${i}: each item must include a non-empty string "fieldId"`,
+        );
+      }
+      if (!Object.prototype.hasOwnProperty.call(entry, "value")) {
+        return makeErrorResponse(
+          `Invalid field entry for "${entry.fieldId}" at index ${i}: missing "value" property`,
+        );
+      }
+    }
+
+    try {
+      const script = runtime.getCurrentScript();
+      const startGovernance = script.getRemainingUsage();
+      const timer = new ExecutionTimer();
+
+      const recordObj = record.create({
+        type: rawRecordType,
+        isDynamic: true,
+      });
+
+      for (const entry of request.fields) {
+        const fieldId = entry.fieldId.trim();
+        const normalizedValue = normalizeFieldValue(recordObj, fieldId, entry.value);
+
+        try {
+          recordObj.setValue({
+            fieldId: fieldId,
+            value: normalizedValue,
+          });
+        } catch (fieldErr) {
+          // If a date string failed because getField metadata was unavailable, retry with Date conversion
+          if (typeof normalizedValue === "string") {
+            const fallbackDate = parseIsoDateString(normalizedValue);
+            if (fallbackDate) {
+              try {
+                recordObj.setValue({
+                  fieldId: fieldId,
+                  value: fallbackDate,
+                });
+                continue;
+              } catch {
+                // Fall through to report original error
+              }
+            }
+          }
+          throw new Error(
+            `Failed to set field "${fieldId}": ${getErrorMessage(fieldErr)}`,
+          );
+        }
+      }
+
+      const recordId = recordObj.save();
+      const timeElapsedMS = timer.elapsed;
+      const governanceUsed = startGovernance - script.getRemainingUsage();
+
+      return {
+        success: true,
+        recordId: recordId,
+        recordType: rawRecordType,
+        timeElapsedMS: timeElapsedMS,
+        governanceUsed: governanceUsed,
+      };
+    } catch (e) {
+      const errMsg = getErrorMessage(e);
+      return makeErrorResponse(`Unable to create record: ${errMsg}`);
+    }
+  }
+
   // =========================================================================
   // ACTION DISPATCHER
   // =========================================================================
@@ -507,6 +683,7 @@ define(["N/log", "N/query", "N/record", "N/runtime", "N/search"], (
     [MCP_ACTION.RUN_SUITE_QL]: handleRunSuiteQL,
     [MCP_ACTION.RUN_FUNCTION]: handleRunFunction,
     [MCP_ACTION.RECORD_SAMPLE]: handleRecordSample,
+    [MCP_ACTION.CREATE_RECORD]: handleCreateRecord,
   };
 
   /**

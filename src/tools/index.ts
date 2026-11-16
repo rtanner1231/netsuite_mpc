@@ -5,6 +5,7 @@ import { getRunFunctionLogsTool } from "./getRunFunctionLogs.js";
 import { uploadFileTool } from "./uploadFile.js";
 import { runFunctionTool } from "./runFunction.js";
 import { loadRecordSampleTool } from "./loadRecordSample.js";
+import { createRecordTool } from "./createRecord.js";
 import { createCustomRecordTool } from "./createCustomRecord.js";
 import { createCustomListTool } from "./createCustomList.js";
 import { updateCustomRecordTool } from "./updateCustomRecord.js";
@@ -27,6 +28,7 @@ export const toolsRegistry = [
     uploadFileTool,
     runFunctionTool,
     loadRecordSampleTool,
+    createRecordTool,
     createCustomRecordTool,
     createCustomListTool,
     updateCustomRecordTool,
