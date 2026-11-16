@@ -134,6 +134,87 @@
     </style>
 
     <script language="javascript">
+      const NATIVE_RECORD_ID_MAP = {
+        "-2": "customer",
+        "-3": "vendor",
+        "-4": "employee",
+        "-5": "partner",
+        "-6": "contact",
+        "-7": "job",
+        "-10": "item",
+        "-20": "calendarevent",
+        "-21": "task",
+        "-22": "phonecall",
+        "-23": "supportcase",
+        "-24": "campaign",
+        "-25": "solution",
+        "-26": "issue",
+        "-28": "resourceallocation",
+        "-30": "transaction",
+        "-31": "opportunity",
+        "-36": "manufacturingoperationtask",
+        "-101": "classification",
+        "-102": "department",
+        "-103": "location",
+        "-105": "accountingperiod",
+        "-109": "customercategory",
+        "-110": "vendorcategory",
+        "-112": "account",
+        "-117": "subsidiary",
+        "-122": "currency",
+        "-124": "customfield",
+        "-126": "expensecategory",
+        "-128": "salestaxitem",
+        "-151": "supportcaseissue",
+        "-152": "supportcaseorigin",
+        "-153": "supportcasepriority",
+        "-155": "costcategory",
+        "-157": "contactrole",
+        "-158": "contactcategory",
+        "-161": "customermessage",
+        "-177": "jobtype",
+        "-180": "notetype",
+        "-181": "othernamecategory",
+        "-182": "partnercategory",
+        "-183": "paymentmethod",
+        "-186": "pricelevel",
+        "-187": "pricinggroup",
+        "-191": "salesrole",
+        "-192": "shipitem",
+        "-193": "shippingpackage",
+        "-199": "term",
+        "-201": "unitstype",
+        "-203": "winlossreason",
+        "-242": "bin",
+        "-245": "shippingstatus",
+        "-246": "itemdemandplan",
+        "-250": "globalaccountmapping",
+        "-251": "itemaccountmapping",
+        "-254": "apppackage",
+        "-255": "appdefinition",
+        "-256": "timebill",
+        "-260": "inventorydetail",
+        "-265": "payrollitem",
+        "-266": "inventorynumber",
+        "-289": "address",
+        "-290": "charge",
+        "-292": "timesheet",
+        "-294": "manufacturingcosttemplate",
+        "-295": "timeentry",
+        "-303": "note",
+        "-322": "consolidatedexchangerate",
+        "-332": "fairvalueprice",
+        "-362": "usage",
+        "-396": "budgetcategory",
+        "-400": "nexus",
+        "-420": "budgetimport",
+        "-422": "bom",
+        "-423": "bomrevision",
+        "-538": "paymentcard",
+        "-539": "paymentcardtoken",
+        "-540": "generaltoken",
+      };
+
       class SuiteQLMetadataLoader {
         constructor() {
           this.endpoint = "/app/recordscatalog/rcendpoint.nl";
@@ -455,23 +536,26 @@
           // 2. Fetch Custom Fields and foreign key relationships (Paged)
           const fieldsSql = `
             SELECT 
-              LOWER(src.ScriptID)                 AS tableid,
-              LOWER(cf.ScriptID)                  AS id,
-              cf.Name                             AS label,
-              nvl(cf.aidescription,cf.Description)                      AS description,
-              cf.FieldValueType                   AS fieldtype,
+              LOWER(src.ScriptID)                          AS tableid,
+              LOWER(cf.ScriptID)                           AS id,
+              cf.Name                                      AS label,
+              nvl(cf.aidescription,cf.Description)         AS description,
+              cf.FieldValueType                            AS fieldtype,
               CASE 
                 WHEN LOWER(cf.FieldValueType) IN ('list/record', 'multiple select') THEN 1 
                 ELSE 0 
-              END                                 AS is_join,
-              LOWER(tgt.ScriptID)                 AS target_custom_table,
-              BUILTIN.DF(cf.FieldValueTypeRecord) AS target_label
+              END                                          AS is_join,
+              cf.FieldValueTypeRecord                      AS target_record_id,
+              LOWER(NVL(tgt.ScriptID, tgt_list.ScriptID))  AS target_custom_table,
+              BUILTIN.DF(cf.FieldValueTypeRecord)          AS target_label
             FROM 
               CustomRecordType src
             INNER JOIN 
               CustomField cf ON cf.RecordType = src.InternalID
             LEFT JOIN 
               CustomRecordType tgt ON tgt.InternalID = cf.FieldValueTypeRecord
+            LEFT JOIN 
+              CustomList tgt_list ON tgt_list.InternalID = cf.FieldValueTypeRecord
             ORDER BY 
               src.ScriptID, cf.ScriptID
           `;
@@ -577,6 +661,7 @@
               } else {
                 const targetId =
                   row.target_custom_table ||
+                  NATIVE_RECORD_ID_MAP[String(row.target_record_id)] ||
                   (row.target_label
                     ? row.target_label.toLowerCase().replace(/\s+/g, "_")
                     : "");
@@ -991,19 +1076,21 @@
 
             const fRes = await this.runSuiteQL(`
               SELECT 
-                LOWER(cf.ScriptID)                  AS id, 
-                cf.Name                             AS label, 
-                cf.Description                      AS description, 
-                cf.FieldValueType                   AS fieldtype,
+                LOWER(cf.ScriptID)                           AS id, 
+                cf.Name                                      AS label, 
+                cf.Description                               AS description, 
+                cf.FieldValueType                            AS fieldtype,
                 CASE 
                   WHEN LOWER(cf.FieldValueType) IN ('list/record', 'multiple select') THEN 1 
                   ELSE 0 
-                END                                 AS is_join,
-                LOWER(tgt.ScriptID)                 AS target_custom_table, 
-                BUILTIN.DF(cf.FieldValueTypeRecord) AS target_label
+                END                                          AS is_join,
+                cf.FieldValueTypeRecord                      AS target_record_id,
+                LOWER(NVL(tgt.ScriptID, tgt_list.ScriptID))  AS target_custom_table, 
+                BUILTIN.DF(cf.FieldValueTypeRecord)          AS target_label
               FROM CustomField cf
               INNER JOIN CustomRecordType src ON cf.RecordType = src.InternalID
               LEFT JOIN CustomRecordType tgt ON tgt.InternalID = cf.FieldValueTypeRecord
+              LEFT JOIN CustomList tgt_list ON tgt_list.InternalID = cf.FieldValueTypeRecord
               WHERE LOWER(src.ScriptID) = '${tableNameInput}'
               ORDER BY cf.ScriptID
             `);
@@ -1036,6 +1123,7 @@
                 } else {
                   const targetId =
                     cf.target_custom_table ||
+                    NATIVE_RECORD_ID_MAP[String(cf.target_record_id)] ||
                     (cf.target_label
                       ? cf.target_label.toLowerCase().replace(/\s+/g, "_")
                       : "");
