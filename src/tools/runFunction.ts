@@ -24,7 +24,9 @@ export const runFunctionTool: ToolDefinition = {
             },
             args: {
                 type: "array",
-                items: {},
+                items: {
+                    type: ["string", "number", "boolean", "object", "array", "null"]
+                },
                 description: "Arguments array to pass to the function."
             }
         },
