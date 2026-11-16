@@ -332,7 +332,7 @@ export function formatRelatedTablesMap(
 export const getRelatedTablesTool: ToolDefinition = {
     name: "netsuite_get_related_tables",
     description:
-        "Builds a map of related NetSuite tables starting from a specific table ID by traversing field joins across hop levels.",
+        "Builds a map of related NetSuite tables starting from a specific table ID by traversing outgoing field joins across hop levels (1 to 5, default 2) in the local SQLite schema database. Outputs join conditions and supports filtering custom lists or expanding polymorphic transaction subtypes.",
     meta: {
         isDestructive: false,
         requiresSdf: false

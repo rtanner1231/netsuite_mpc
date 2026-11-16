@@ -120,7 +120,8 @@ async function fetchFromDatabase(schemaPath: string, table_id: string): Promise<
 
 export const getNetsuiteFieldsTool: ToolDefinition = {
     name: "netsuite_get_fields",
-    description: "Retrieve field definitions for a specific NetSuite table based on the locally configured environment.",
+    description:
+        "Retrieve table metadata and field definitions (IDs, types, labels, descriptions, and join relationships) for a specific NetSuite table from the active environment's local SQLite schema database. Automatically falls back to the NetSuite REST Metadata API if the table is not found locally or if useFallback is true.",
     meta: {
         isDestructive: false,
         requiresSdf: false
@@ -128,8 +129,8 @@ export const getNetsuiteFieldsTool: ToolDefinition = {
     inputSchema: {
         type: "object",
         properties: { 
-            table_id: { type: "string", description: "The internal ID of the NetSuite table" },
-            useFallback: { type: "boolean", description: "If true, skips looking for the database and directly calls the NetSuite metadata endpoint. Only set this to true if the user explicitly requests it." }
+            table_id: { type: "string", description: "The internal ID of the NetSuite table (e.g., 'transaction', 'customer', or 'customrecord_...')." },
+            useFallback: { type: "boolean", description: "If true, skips looking for the local schema database and directly calls the NetSuite REST Metadata API. Only set this to true if the user explicitly requests it." }
         },
         required: ["table_id"]
     },

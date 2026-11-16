@@ -17,7 +17,8 @@ type ListCreateCustomList = {
 
 export const createCustomListTool: ToolDefinition = {
     name: "netsuite_create_custom_list",
-    description: "Creates and deploys a new Custom List in NetSuite via SDF.",
+    description:
+        "Creates and deploys a new Custom List (customlist_*) and its list values in NetSuite via SDF, applying any configured list defaults.",
     meta: {
         isDestructive: true,
         requiresSdf: true

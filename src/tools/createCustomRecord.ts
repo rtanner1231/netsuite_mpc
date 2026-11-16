@@ -14,7 +14,8 @@ type RecordCreateCustomRecord = {
 
 export const createCustomRecordTool: ToolDefinition = {
     name: "netsuite_create_custom_record",
-    description: "Creates and deploys a new Custom Record Type in NetSuite via SDF.",
+    description:
+        "Creates and deploys a new Custom Record Type (customrecord_*) and its custom fields (custrecord_*) in NetSuite via SDF, applying configured defaults and resolving manifest.xml dependencies.",
     meta: {
         isDestructive: true,
         requiresSdf: true

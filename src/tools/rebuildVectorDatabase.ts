@@ -337,7 +337,8 @@ export const rebuildVectorDatabaseTool: ToolDefinition = {
 
 export const rebuildVectorDatabaseStatusTool: ToolDefinition = {
     name: "netsuite_rebuild_vector_database_status",
-    description: "Checks the status and progress of the vector database rebuild for the active NetSuite environment.",
+    description:
+        "Checks the status and progress of the vector database rebuild for the active NetSuite environment, returning the current phase, indexed table progress, and elapsed time, or indicating whether an existing vector database is available on disk.",
     meta: {
         isDestructive: false,
         requiresSdf: false

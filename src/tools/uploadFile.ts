@@ -11,14 +11,21 @@ const execAsync = util.promisify(exec);
 
 export const uploadFileTool: ToolDefinition = {
     name: "netsuite_upload_file",
-    description: "Uploads an array of specific script files to NetSuite using the SuiteCloud CLI.",
+    description:
+        "Uploads an array of script files to the NetSuite File Cabinet using the SuiteCloud CLI. Runs 'npm run build' first if available, maps 'TypeScripts/*.ts' paths to '/SuiteScripts/*.js', and aligns 'defaultAuthId' in project.json with the active environment's sdfId.",
     meta: {
         isDestructive: true,
         requiresSdf: true
     },
     inputSchema: {
         type: "object",
-        properties: { filePaths: { type: "array", items: { type: "string" } } },
+        properties: {
+            filePaths: {
+                type: "array",
+                items: { type: "string" },
+                description: "Array of file paths to upload (e.g., ['/SuiteScripts/myScript.js'] or ['TypeScripts/myScript.ts'])."
+            }
+        },
         required: ["filePaths"]
     },
     execute: async (args: { filePaths: string[] }, server: Server) => {
