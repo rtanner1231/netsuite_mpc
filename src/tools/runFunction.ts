@@ -25,7 +25,14 @@ export const runFunctionTool: ToolDefinition = {
             args: {
                 type: "array",
                 items: {
-                    type: ["string", "number", "boolean", "object", "array", "null"]
+                    anyOf: [
+                        { type: "string" },
+                        { type: "number" },
+                        { type: "boolean" },
+                        { type: "object" },
+                        { type: "array" },
+                        { type: "null" }
+                    ]
                 },
                 description: "Arguments array to pass to the function."
             }
