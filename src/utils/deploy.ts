@@ -4,6 +4,7 @@ import { exec } from "child_process";
 import util from "util";
 import { create } from "xmlbuilder2"; // Added xmlbuilder2 import
 import { getActiveEnvironment, ENV_PATH } from "./config.js";
+import { getSdfSrcDir } from "./project.js";
 
 const execAsync = util.promisify(exec);
 
@@ -140,20 +141,6 @@ export const restoreDeployXml = async (srcPath: string, originalContent: string 
     }
 };
 
-const getSrcPath = (projectRoot: string): string => {
-    //TODO: this should be configurable
-    return path.join(projectRoot, "dist");
-}
-
-/**
- * Runs the full, safe deployment pipeline for specific objects/files.
- * 1. Swaps project.json defaultAuthId to the active environment.
- * 2. Backs up deploy.xml.
- * 3. Writes a temporary deploy.xml with the target objects.
- * 4. Updates manifest.xml with required dependencies (if provided).
- * 5. Executes `suitecloud project:deploy`.
- * 6. Restoration of deploy.xml and project.json in a finally block.
- */
 export const runDeploymentPipeline = async (
     projectRoot: string,
     deployConfig: DeployConfig,
@@ -164,7 +151,7 @@ export const runDeploymentPipeline = async (
     let originalDeployXml: string | null = null;
 
     const projectJsonPath = path.join(projectRoot, "project.json");
-    const srcPath = getSrcPath(projectRoot);
+    const srcPath = await getSdfSrcDir(projectRoot);
 
     try {
         const environment = await getActiveEnvironment();

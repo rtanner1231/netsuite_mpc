@@ -1,6 +1,11 @@
 import { ToolDefinition } from "../types/index.js";
 import { getProjectRoot } from "../utils/mcp.js";
 import { getActiveEnvironment, ENV_PATH } from "../utils/config.js";
+import {
+    getProjectConfig,
+    runProjectBuild,
+    resolveProjectFiles
+} from "../utils/project.js";
 import fs from "fs/promises";
 import path from "path";
 import { exec } from "child_process";
@@ -12,7 +17,10 @@ const execAsync = util.promisify(exec);
 export const uploadFileTool: ToolDefinition = {
     name: "netsuite_upload_file",
     description:
-        "Uploads an array of script files to the NetSuite File Cabinet using the SuiteCloud CLI. Runs 'npm run build' first if available, maps 'TypeScripts/*.ts' paths to '/SuiteScripts/*.js', and aligns 'defaultAuthId' in project.json with the active environment's sdfId.",
+        "Uploads an array of script files to the NetSuite File Cabinet using the SuiteCloud CLI. " +
+        "Conditionally builds the project first (auto-detected or configured via buildBeforeUpload / buildCommand), " +
+        "resolves TypeScript (.ts) paths to their compiled JavaScript (.js) File Cabinet paths via tsconfig.json or configuration, " +
+        "and temporarily aligns 'defaultAuthId' in project.json with the active environment's sdfId.",
     meta: {
         isDestructive: true,
         requiresSdf: true
@@ -23,13 +31,18 @@ export const uploadFileTool: ToolDefinition = {
             filePaths: {
                 type: "array",
                 items: { type: "string" },
-                description: "Array of file paths to upload (e.g., ['/SuiteScripts/myScript.js'] or ['TypeScripts/myScript.ts'])."
+                description:
+                    "Array of file paths to upload (e.g., ['/SuiteScripts/myScript.js'], ['TypeScripts/myScript.ts'], or ['src/FileCabinet/SuiteScripts/myScript.ts'])."
+            },
+            skipBuild: {
+                type: "boolean",
+                description: "Optional flag to skip running the project build step before uploading."
             }
         },
         required: ["filePaths"]
     },
-    execute: async (args: { filePaths: string[] }, server: Server) => {
-        const { filePaths } = args;
+    execute: async (args: { filePaths: string[]; skipBuild?: boolean }, server: Server) => {
+        const { filePaths, skipBuild } = args;
         if (!Array.isArray(filePaths) || filePaths.length === 0) {
             return { content: [{ type: "text", text: "Failure: 'filePaths' must be a non-empty array of strings." }] };
         }
@@ -56,25 +69,28 @@ export const uploadFileTool: ToolDefinition = {
                 return { content: [{ type: "text", text: `Failure: Could not read project.json at ${projectJsonPath}.` }] };
             }
 
+            const projectConfig = await getProjectConfig(projectRoot);
+            const buildResult = await runProjectBuild(
+                projectRoot,
+                { skipBuild, filePaths },
+                projectConfig
+            );
+
+            if (!buildResult.success) {
+                return {
+                    content: [{ type: "text", text: `Failure: ${buildResult.error}` }]
+                };
+            }
+
+            const resolvedFiles = await resolveProjectFiles(projectRoot, filePaths, projectConfig);
+            const mappedPaths = resolvedFiles.map(file => `"${file.fileCabinetPath}"`);
+            const cliPathsString = mappedPaths.join(" ");
+
             if (projectJson.defaultAuthId !== targetSdfId) {
                 originalAuthId = projectJson.defaultAuthId;
                 projectJson.defaultAuthId = targetSdfId;
                 await fs.writeFile(projectJsonPath, JSON.stringify(projectJson, null, 2));
             }
-
-            try { await execAsync("npm run build", { cwd: projectRoot }); } catch (e) { }
-
-            const mappedPaths = filePaths.map(filePath => {
-                let finalPath = filePath;
-                if (finalPath.startsWith('/TypeScripts/')) finalPath = '/SuiteScripts/' + finalPath.substring('/TypeScripts/'.length);
-                else if (finalPath.startsWith('TypeScripts/')) finalPath = '/SuiteScripts/' + finalPath.substring('TypeScripts/'.length);
-
-                if (!finalPath.startsWith('/')) finalPath = '/' + finalPath;
-                if (finalPath.endsWith('.ts')) finalPath = finalPath.slice(0, -3) + '.js';
-                return `"${finalPath}"`;
-            });
-
-            const cliPathsString = mappedPaths.join(" ");
 
             try {
                 const { stdout } = await execAsync(`suitecloud file:upload --paths ${cliPathsString}`, { cwd: projectRoot });

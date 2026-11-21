@@ -40,7 +40,7 @@ The server exposes the following MCP tools to interact directly with NetSuite, o
 ### 5. SDF Updates & File Deployment
 *(Requires SuiteCloud CLI, `sdfId` configured in `env.json`, and an SDF project with `project.json`; all tools in this section are marked Destructive)*
 
-- **`netsuite_upload_file`**: Upload an array of script files directly to the NetSuite File Cabinet using the SuiteCloud CLI (`suitecloud file:upload`). Automatically runs `npm run build` in the project root, maps `TypeScripts/.../*.ts` paths to `/SuiteScripts/.../*.js`, and temporarily aligns `defaultAuthId` in `project.json` with the active environment's `sdfId`.
+- **`netsuite_upload_file`**: Upload an array of script files directly to the NetSuite File Cabinet using the SuiteCloud CLI (`suitecloud file:upload`). Conditionally runs the project build command (auto-detected or configured via `buildBeforeUpload` / `buildCommand`), resolves TypeScript (`.ts`) paths to compiled JavaScript (`.js`) File Cabinet paths via `tsconfig.json` (supporting both separate `rootDir`/`outDir` and intermingled in-place layouts) or explicit configuration, and temporarily aligns `defaultAuthId` in `project.json` with the active environment's `sdfId`.
 - **`netsuite_create_custom_record`**: Create and deploy a new Custom Record Type (`customrecord_*`) and its custom fields (`custrecord_*`) to NetSuite via SDF. Supports field types, `SELECT`/`MULTISELECT` record references, automatic `manifest.xml` dependency resolution, and default record/field properties from `config.json`.
 - **`netsuite_update_custom_record`**: Update and redeploy an existing Custom Record Type (`customrecord_*`) via SDF. Downloads the latest XML definition from NetSuite, updates header properties (`name`, `includeNameField`) and/or appends new custom fields (`custrecord_*`), recalculates `manifest.xml` dependencies, and deploys the updated object.
 - **`netsuite_create_custom_list`**: Create and deploy a new Custom List (`customlist_*`) and its list values to NetSuite via SDF, applying any default list properties configured in `config.json`.
@@ -170,9 +170,9 @@ Create `env.json` in the configuration directory:
 }
 ```
 
-### 3. The `config.json` File (Optional)
+### 3. The `config.json` File & Project-Level Configuration (Optional)
 
-You can optionally create a `config.json` file in the configuration directory to define default settings for object creations.
+You can optionally create a `config.json` file in the configuration directory to define default settings for object creations as well as global SDF/build/upload defaults. You can also override the `project` settings on a per-repository basis by adding a `"netsuiteMcp"` key to your SDF project's `package.json` or creating a `.netsuitemcp.json` file in the SDF project root.
 
 ```json
 {
@@ -180,9 +180,22 @@ You can optionally create a `config.json` file in the configuration directory to
     "RECORD": {
       "accessType": "USE_PERMISSION_LIST"
     }
+  },
+  "project": {
+    "sdfSourceDir": "dist",
+    "buildBeforeUpload": "auto",
+    "buildCommand": "npm run build",
+    "tsRootDir": "TypeScripts",
+    "jsOutDir": "dist/FileCabinet/SuiteScripts",
+    "tsconfigPath": "tsconfig.json"
   }
 }
 ```
+
+- **`sdfSourceDir`**: SDF folder relative to the project root (e.g., `"dist"`, `"src"`, `"."`). If omitted, auto-detected from `suitecloud.config.js` (`defaultProjectFolder`) or `manifest.xml` location.
+- **`buildBeforeUpload`**: `"auto"` (default, runs the build only when a build script/command exists and TypeScript is used), `true` (always build), or `false` (never build).
+- **`buildCommand`**: Command to run when building (defaults to `"npm run build"`).
+- **`tsRootDir` / `jsOutDir`**: Optional explicit TypeScript source and JavaScript output directory overrides (if omitted, automatically resolved from `tsconfig.json`).
 
 ## Generating the SQLite Schema Database (`netsuitescripts/MCPSchemaLoad.html`)
 

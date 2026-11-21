@@ -5,6 +5,7 @@ import { exec } from "child_process";
 import { runDeploymentPipeline, ManifestDependencies } from "./deploy.js";
 import { create } from "xmlbuilder2";
 import { getProjectRoot } from "./mcp.js";
+import { getSdfSrcDir } from "./project.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { ToolDefinition } from "../types/index.js";
 
@@ -42,7 +43,8 @@ export const deploySdfObject = async (
     manifestDependencies?: ManifestDependencies // New optional parameter
 ): Promise<string> => {
     const branchFolder = await getSanitizedBranchName(projectRoot);
-    const objectsDir = path.join(projectRoot, "dist", "Objects", branchFolder);
+    const sdfSrcDir = await getSdfSrcDir(projectRoot);
+    const objectsDir = path.join(sdfSrcDir, "Objects", branchFolder);
 
     try {
         await fs.access(objectsDir);
@@ -76,7 +78,8 @@ export const downloadSdfObject = async (
     type: string
 ): Promise<string> => {
     const branchFolder = await getSanitizedBranchName(projectRoot);
-    const objectsDir = path.join(projectRoot, "dist", "Objects", branchFolder);
+    const sdfSrcDir = await getSdfSrcDir(projectRoot);
+    const objectsDir = path.join(sdfSrcDir, "Objects", branchFolder);
 
     try {
         await fs.access(objectsDir);
