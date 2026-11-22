@@ -7,12 +7,14 @@
  * Provides endpoints for executing SuiteQL queries, retrieving script execution logs,
  * dynamically running SuiteScript functions, and inspecting record samples.
  */
-define(["N/log", "N/query", "N/record", "N/runtime", "N/search"], (
+define(["N/config", "N/log", "N/query", "N/record", "N/runtime", "N/search", "N/translation"], (
+  config,
   log,
   query,
   record,
   runtime,
   search,
+  translation,
 ) => {
   // =========================================================================
   // CONSTANTS & ACTION ENUM
@@ -24,6 +26,8 @@ define(["N/log", "N/query", "N/record", "N/runtime", "N/search"], (
     RUN_FUNCTION: "RUN_FUNCTION",
     RECORD_SAMPLE: "RECORD_SAMPLE",
     CREATE_RECORD: "CREATE_RECORD",
+    GET_SUPPORTED_LOCALES: "GET_SUPPORTED_LOCALES",
+    GET_TRANSLATIONS: "GET_TRANSLATIONS",
   };
 
   // =========================================================================
@@ -674,6 +678,580 @@ define(["N/log", "N/query", "N/record", "N/runtime", "N/search"], (
     }
   }
 
+  /**
+   * Normalizes a locale identifier into both NetSuite format (e.g., "en_US")
+   * and SDF/XLIFF format (e.g., "en-US").
+   *
+   * @param {string} rawLocale
+   * @returns {{ netsuiteLocale: string, sdfLocale: string } | null}
+   */
+  function normalizeLocaleFormats(rawLocale) {
+    if (!rawLocale || typeof rawLocale !== "string") return null;
+    const trimmed = rawLocale.trim();
+    if (!trimmed) return null;
+
+    // Resolve enum keys if passed (e.g., "ENGLISH_US")
+    if (translation && translation.Locale && translation.Locale[trimmed]) {
+      const enumVal = String(translation.Locale[trimmed]);
+      return {
+        netsuiteLocale: enumVal.replace(/-/g, "_"),
+        sdfLocale: enumVal.replace(/_/g, "-"),
+      };
+    }
+
+    const parts = trimmed.split(/[-_]/);
+    if (parts.length === 2 && parts[0].length >= 2 && parts[1].length >= 2) {
+      const lang = parts[0].toLowerCase();
+      const region = parts[1].toUpperCase();
+      return {
+        netsuiteLocale: `${lang}_${region}`,
+        sdfLocale: `${lang}-${region}`,
+      };
+    }
+
+    return {
+      netsuiteLocale: trimmed.replace(/-/g, "_"),
+      sdfLocale: trimmed.replace(/_/g, "-"),
+    };
+  }
+
+  /**
+   * Discovers the active/configured languages in the NetSuite environment.
+   *
+   * @returns {{ defaultLocale: string | null, locales: Array<{ sdfLocale: string, netsuiteLocale: string, name?: string, isDefault: boolean, source: string }> }}
+   */
+  function discoverSupportedLocales() {
+    let defaultNetsuiteLocale = null;
+
+    try {
+      const currentUser = runtime.getCurrentUser();
+      const userLang = currentUser.getPreference({ name: "LANGUAGE" });
+      if (userLang) {
+        const norm = normalizeLocaleFormats(String(userLang));
+        if (norm) defaultNetsuiteLocale = norm.netsuiteLocale;
+      }
+    } catch {
+      // Ignore runtime preference lookup errors
+    }
+
+    try {
+      if (config && config.load && config.Type && config.Type.COMPANY_PREFERENCES) {
+        const compPrefs = config.load({
+          type: config.Type.COMPANY_PREFERENCES,
+        });
+        if (compPrefs) {
+          const compLang = compPrefs.getValue({ fieldId: "LOCALE" }) || compPrefs.getValue({ fieldId: "LANGUAGE" });
+          if (compLang) {
+            const norm = normalizeLocaleFormats(String(compLang));
+            if (norm) defaultNetsuiteLocale = norm.netsuiteLocale;
+          }
+        }
+      }
+    } catch {
+      // Ignore if role lacks Set Up Company permission
+    }
+
+    const localeMap = {};
+
+    const addLocaleEntry = (rawLocale, name, source, isDefaultOverride) => {
+      const norm = normalizeLocaleFormats(rawLocale);
+      if (!norm) return;
+      const key = norm.sdfLocale;
+      const isDef =
+        Boolean(isDefaultOverride) ||
+        (defaultNetsuiteLocale != null && norm.netsuiteLocale === defaultNetsuiteLocale);
+
+      if (!localeMap[key]) {
+        localeMap[key] = {
+          sdfLocale: norm.sdfLocale,
+          netsuiteLocale: norm.netsuiteLocale,
+          name: name || norm.sdfLocale,
+          isDefault: isDef,
+          source: source,
+        };
+      } else {
+        if (name && localeMap[key].name === localeMap[key].sdfLocale) {
+          localeMap[key].name = name;
+        }
+        if (isDef) {
+          localeMap[key].isDefault = true;
+        }
+      }
+    };
+
+    // 1. Query enabled languages from NetSuite's Setup > Company > General Preferences > Languages.
+    // In SuiteQL:
+    // - companypreference (preference = 'LANGUAGE') stores the company default locale (e.g. 'en_US').
+    // - websitelanguage contains the exact set of languages enabled under General Preferences > Languages.
+    // - companypreference (preference = 'TRANSLATION_LANGUAGES') stores the \u0005-delimited language keys.
+    // - language (key, descr, deflocale, inactive) maps language keys/locales to their display names.
+    const languageByLocale = {};
+    const languageByKey = {};
+
+    try {
+      const langRows = query
+        .runSuiteQL({
+          query: "SELECT key, descr, deflocale, inactive FROM language",
+        })
+        .asMappedResults();
+
+      if (Array.isArray(langRows)) {
+        for (const r of langRows) {
+          const defLoc = r.deflocale ? String(r.deflocale).trim() : "";
+          const langKey = r.key ? String(r.key).trim() : "";
+          const descr = r.descr ? String(r.descr).trim() : "";
+          const normKey = langKey.replace(/_/g, " ").toUpperCase();
+
+          const info = {
+            key: langKey,
+            descr: descr,
+            deflocale: defLoc,
+            inactive: r.inactive,
+          };
+
+          if (defLoc) {
+            languageByLocale[defLoc] = info;
+            const norm = normalizeLocaleFormats(defLoc);
+            if (norm) {
+              languageByLocale[norm.netsuiteLocale] = info;
+              languageByLocale[norm.sdfLocale] = info;
+            }
+          }
+          if (normKey) {
+            languageByKey[normKey] = info;
+          }
+        }
+      }
+    } catch {
+      // Ignore if language table is unavailable
+    }
+
+    // 1a. Check companypreference for LANGUAGE (company default) and TRANSLATION_LANGUAGES
+    let translationLanguageKeys = [];
+    try {
+      const prefRows = query
+        .runSuiteQL({
+          query:
+            "SELECT preference, value FROM companypreference WHERE preference IN ('LANGUAGE', 'TRANSLATION_LANGUAGES')",
+        })
+        .asMappedResults();
+
+      if (Array.isArray(prefRows)) {
+        for (const row of prefRows) {
+          const prefName = row.preference ? String(row.preference).trim() : "";
+          const prefVal = row.value != null ? String(row.value).trim() : "";
+          if (prefName === "LANGUAGE" && prefVal) {
+            const norm = normalizeLocaleFormats(prefVal);
+            if (norm) defaultNetsuiteLocale = norm.netsuiteLocale;
+          } else if (prefName === "TRANSLATION_LANGUAGES" && prefVal) {
+            translationLanguageKeys = prefVal
+              .split(/\u0005|,/)
+              .map((s) => s.trim())
+              .filter(Boolean);
+          }
+        }
+      }
+    } catch {
+      // Ignore if companypreference table is unavailable
+    }
+
+    // 1b. Query websitelanguage (which reflects all languages listed under General Preferences > Languages)
+    try {
+      const wsRows = query
+        .runSuiteQL({
+          query:
+            "SELECT DISTINCT locale, languagename FROM websitelanguage WHERE locale IS NOT NULL ORDER BY locale",
+        })
+        .asMappedResults();
+
+      if (Array.isArray(wsRows) && wsRows.length > 0) {
+        for (const row of wsRows) {
+          const rawLoc = row.locale ? String(row.locale).trim() : "";
+          if (!rawLoc) continue;
+          const langInfo = languageByLocale[rawLoc];
+          const displayName =
+            (langInfo && langInfo.descr) ||
+            (row.languagename ? String(row.languagename).trim() : undefined);
+          addLocaleEntry(rawLoc, displayName, "general_preferences");
+        }
+      }
+    } catch {
+      // Ignore if websitelanguage is unavailable
+    }
+
+    // 1c. Also include any languages from companypreference TRANSLATION_LANGUAGES and language where inactive = 'T'
+    for (const rawKey of translationLanguageKeys) {
+      const normKey = rawKey.replace(/_/g, " ").toUpperCase();
+      const langInfo = languageByKey[normKey];
+      if (langInfo && langInfo.deflocale) {
+        addLocaleEntry(langInfo.deflocale, langInfo.descr, "company_preferences");
+      }
+    }
+
+    for (const locKey of Object.keys(languageByLocale)) {
+      const langInfo = languageByLocale[locKey];
+      if (langInfo && langInfo.inactive === "T" && langInfo.deflocale) {
+        addLocaleEntry(langInfo.deflocale, langInfo.descr, "general_preferences");
+      }
+    }
+
+    // 2. Also inspect N/config COMPANY_PREFERENCES sublists if accessible
+    try {
+      if (config && config.load && config.Type && config.Type.COMPANY_PREFERENCES) {
+        const compPrefs = config.load({
+          type: config.Type.COMPANY_PREFERENCES,
+        });
+        if (compPrefs && typeof compPrefs.getLineCount === "function") {
+          const sublists = ["languages", "language", "systemlanguages", "tranlanguages"];
+          for (const sublistId of sublists) {
+            const lineCount = compPrefs.getLineCount({ sublistId: sublistId });
+            if (lineCount > 0) {
+              for (let i = 0; i < lineCount; i++) {
+                const rawLoc =
+                  compPrefs.getSublistValue({ sublistId: sublistId, fieldId: "locale", line: i }) ||
+                  compPrefs.getSublistValue({ sublistId: sublistId, fieldId: "language", line: i }) ||
+                  compPrefs.getSublistValue({ sublistId: sublistId, fieldId: "id", line: i });
+                const rawName =
+                  compPrefs.getSublistText({ sublistId: sublistId, fieldId: "locale", line: i }) ||
+                  compPrefs.getSublistText({ sublistId: sublistId, fieldId: "language", line: i }) ||
+                  null;
+                if (rawLoc) {
+                  addLocaleEntry(String(rawLoc), rawName ? String(rawName) : undefined, "company_preferences");
+                }
+              }
+              break;
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore sublist inspection errors
+    }
+
+    // 3. Always ensure the default locale is included if known
+    if (defaultNetsuiteLocale) {
+      const defInfo = languageByLocale[defaultNetsuiteLocale];
+      addLocaleEntry(
+        defaultNetsuiteLocale,
+        defInfo ? defInfo.descr : undefined,
+        "account_default",
+        true,
+      );
+    }
+
+    let localesList = Object.keys(localeMap).map((k) => localeMap[k]);
+
+    // 4. If neither company preferences nor SuiteQL returned the account's active languages,
+    // return the N/translation.Locale enum values so the caller still has valid NetSuite locale codes
+    let allStandardLocales = [];
+    if (translation && translation.Locale) {
+      allStandardLocales = Object.keys(translation.Locale).map((enumKey) => {
+        const val = String(translation.Locale[enumKey]);
+        const norm = normalizeLocaleFormats(val);
+        return {
+          enumKey: enumKey,
+          sdfLocale: norm ? norm.sdfLocale : val.replace(/_/g, "-"),
+          netsuiteLocale: norm ? norm.netsuiteLocale : val,
+          isDefault: defaultNetsuiteLocale != null && norm != null && norm.netsuiteLocale === defaultNetsuiteLocale,
+        };
+      });
+    }
+
+    return {
+      defaultLocale: defaultNetsuiteLocale ? defaultNetsuiteLocale.replace(/_/g, "-") : null,
+      locales: localesList,
+      standardLocales: allStandardLocales,
+    };
+  }
+
+  /**
+   * ACTION: GET_SUPPORTED_LOCALES
+   * Returns active languages configured in the NetSuite environment along with standard N/translation locales.
+   *
+   * @returns {Object}
+   */
+  function handleGetSupportedLocales() {
+    try {
+      const timer = new ExecutionTimer();
+      const discovered = discoverSupportedLocales();
+      return {
+        success: true,
+        defaultLocale: discovered.defaultLocale,
+        activeLocales: discovered.locales,
+        standardLocales: discovered.standardLocales,
+        timeElapsedMS: timer.elapsed,
+      };
+    } catch (e) {
+      return makeErrorResponse(`Unable to discover supported locales: ${getErrorMessage(e)}`);
+    }
+  }
+
+  /**
+   * ACTION: GET_TRANSLATIONS
+   * Uses N/translation to load translated strings for a translation collection across requested or active locales.
+   * For non-default locales where N/translation falls back to the default string (meaning no translation is entered
+   * for that locale), returns "" (empty string) to accurately reflect the state of the translation string.
+   *
+   * @param {Object} request
+   * @param {string} request.collectionId
+   * @param {Array<string>} request.keys
+   * @param {Array<string>} [request.locales]
+   * @param {string} [request.defaultLocale]
+   * @returns {Object}
+   */
+  function handleGetTranslations(request) {
+    const collectionId =
+      typeof request.collectionId === "string" ? request.collectionId.trim() : "";
+    if (!collectionId) {
+      return makeErrorResponse('Missing or invalid "collectionId"');
+    }
+
+    const keys = Array.isArray(request.keys)
+      ? request.keys.filter((k) => typeof k === "string" && k.trim() !== "").map((k) => k.trim())
+      : [];
+
+    if (keys.length === 0) {
+      return {
+        success: true,
+        collectionId: collectionId,
+        localesChecked: [],
+        translations: {},
+      };
+    }
+
+    try {
+      const timer = new ExecutionTimer();
+      const discovered = discoverSupportedLocales();
+
+      let defaultNorm = request.defaultLocale
+        ? normalizeLocaleFormats(String(request.defaultLocale))
+        : discovered.defaultLocale
+          ? normalizeLocaleFormats(String(discovered.defaultLocale))
+          : null;
+
+      let targetLocaleNorms = [];
+      const explicitLocalesProvided = Array.isArray(request.locales) && request.locales.length > 0;
+
+      if (explicitLocalesProvided) {
+        for (const rawLoc of request.locales) {
+          const norm = normalizeLocaleFormats(String(rawLoc));
+          if (norm) targetLocaleNorms.push(norm);
+        }
+      } else {
+        if (discovered.locales && discovered.locales.length > 0) {
+          targetLocaleNorms = discovered.locales.map((l) => ({
+            sdfLocale: l.sdfLocale,
+            netsuiteLocale: l.netsuiteLocale,
+          }));
+        } else if (discovered.standardLocales && discovered.standardLocales.length > 0) {
+          targetLocaleNorms = discovered.standardLocales.map((l) => ({
+            sdfLocale: l.sdfLocale,
+            netsuiteLocale: l.netsuiteLocale,
+          }));
+        }
+      }
+
+      if (!defaultNorm && targetLocaleNorms.length > 0) {
+        defaultNorm = targetLocaleNorms[0];
+      }
+
+      // Deduplicate target locales by sdfLocale
+      const uniqueLocales = [];
+      const seen = {};
+      for (const loc of targetLocaleNorms) {
+        if (!seen[loc.sdfLocale]) {
+          seen[loc.sdfLocale] = true;
+          uniqueLocales.push(loc);
+        }
+      }
+
+      // If no target locales were resolved, use defaultNorm if available
+      if (uniqueLocales.length === 0 && defaultNorm) {
+        uniqueLocales.push(defaultNorm);
+      }
+
+      // Initialize result map: translations[key][sdfLocale] = value
+      const translationsByKey = {};
+      for (const k of keys) {
+        translationsByKey[k] = {};
+      }
+
+      if (uniqueLocales.length === 0) {
+        return {
+          success: true,
+          collectionId: collectionId,
+          localesChecked: [],
+          translations: translationsByKey,
+          timeElapsedMS: timer.elapsed,
+        };
+      }
+
+      // Helper to resolve a key function on a loaded collection handle (supporting case-insensitive key match)
+      const invokeHandleKey = (colObj, keyName) => {
+        if (!colObj) return null;
+        if (typeof colObj[keyName] === "function") {
+          return colObj[keyName]();
+        }
+        const upper = keyName.toUpperCase();
+        if (typeof colObj[upper] === "function") {
+          return colObj[upper]();
+        }
+        const lower = keyName.toLowerCase();
+        if (typeof colObj[lower] === "function") {
+          return colObj[lower]();
+        }
+        return null;
+      };
+
+      // Chunk keys in batches of 1000 (N/translation.load has a 1000-key limit per call)
+      const KEY_BATCH_SIZE = 1000;
+      const keyBatches = [];
+      for (let i = 0; i < keys.length; i += KEY_BATCH_SIZE) {
+        keyBatches.push(keys.slice(i, i + KEY_BATCH_SIZE));
+      }
+
+      // 1. Load baseline (default locale) values across all key batches so we can detect
+      // when a non-default locale falls back to the default string (untranslated -> "")
+      const baselineLocale = (defaultNorm || uniqueLocales[0]).netsuiteLocale;
+      const baselineValues = {};
+
+      for (let b = 0; b < keyBatches.length; b++) {
+        const batchKeys = keyBatches[b];
+        const baseHandle = translation.load({
+          collections: [
+            {
+              alias: "col",
+              collection: collectionId,
+              keys: batchKeys,
+            },
+          ],
+          locales: [baselineLocale],
+        });
+
+        for (const k of batchKeys) {
+          try {
+            const val = invokeHandleKey(baseHandle && baseHandle.col, k);
+            baselineValues[k] = val != null ? String(val) : null;
+          } catch {
+            baselineValues[k] = null;
+          }
+        }
+      }
+
+      // 2. N/translation.load only loads the locales passed in its `locales` array (max 5 locales per call),
+      // and translation.selectLocale only works for locales that were loaded in that handle!
+      // Therefore, chunk uniqueLocales into batches of 5.
+      const LOCALE_BATCH_SIZE = 5;
+      const localeBatches = [];
+      for (let i = 0; i < uniqueLocales.length; i += LOCALE_BATCH_SIZE) {
+        localeBatches.push(uniqueLocales.slice(i, i + LOCALE_BATCH_SIZE));
+      }
+
+      const checkedLocalesSet = {};
+      const localesChecked = [];
+
+      for (let lb = 0; lb < localeBatches.length; lb++) {
+        const locBatch = localeBatches[lb];
+        const nsLocalesInBatch = locBatch.map((l) => l.netsuiteLocale);
+
+        for (let kb = 0; kb < keyBatches.length; kb++) {
+          const batchKeys = keyBatches[kb];
+          let batchHandle = null;
+
+          try {
+            batchHandle = translation.load({
+              collections: [
+                {
+                  alias: "col",
+                  collection: collectionId,
+                  keys: batchKeys,
+                },
+              ],
+              locales: nsLocalesInBatch,
+            });
+          } catch {
+            // If one of the locales in the batch of 5 is rejected by N/translation.load,
+            // fall back to loading each locale in this batch individually
+            batchHandle = null;
+          }
+
+          for (let li = 0; li < locBatch.length; li++) {
+            const loc = locBatch[li];
+            const isDefaultLoc =
+              defaultNorm != null && loc.sdfLocale === defaultNorm.sdfLocale;
+
+            let localeHandle = null;
+            try {
+              if (batchHandle) {
+                localeHandle =
+                  li === 0
+                    ? batchHandle
+                    : translation.selectLocale({
+                        handle: batchHandle,
+                        locale: loc.netsuiteLocale,
+                      });
+              } else {
+                localeHandle = translation.load({
+                  collections: [
+                    {
+                      alias: "col",
+                      collection: collectionId,
+                      keys: batchKeys,
+                    },
+                  ],
+                  locales: [loc.netsuiteLocale],
+                });
+              }
+            } catch {
+              // Skip unsupported locale
+              continue;
+            }
+
+            if (!localeHandle || !localeHandle.col) continue;
+
+            if (!checkedLocalesSet[loc.sdfLocale]) {
+              checkedLocalesSet[loc.sdfLocale] = true;
+              localesChecked.push(loc.sdfLocale);
+            }
+
+            for (const k of batchKeys) {
+              try {
+                const rawVal = invokeHandleKey(localeHandle.col, k);
+                const strVal = rawVal != null ? String(rawVal) : "";
+
+                if (isDefaultLoc) {
+                  translationsByKey[k][loc.sdfLocale] = strVal;
+                } else {
+                  // In N/translation, if a locale has no translation entered, it falls back
+                  // to returning the default locale's string. Report "" in that case.
+                  const baseVal = baselineValues[k];
+                  if (baseVal != null && strVal === baseVal) {
+                    translationsByKey[k][loc.sdfLocale] = "";
+                  } else {
+                    translationsByKey[k][loc.sdfLocale] = strVal;
+                  }
+                }
+              } catch {
+                translationsByKey[k][loc.sdfLocale] = "";
+              }
+            }
+          }
+        }
+      }
+
+      return {
+        success: true,
+        collectionId: collectionId,
+        defaultLocale: defaultNorm ? defaultNorm.sdfLocale : null,
+        localesChecked: localesChecked,
+        translations: translationsByKey,
+        timeElapsedMS: timer.elapsed,
+      };
+    } catch (e) {
+      return makeErrorResponse(`Unable to load translations for "${collectionId}": ${getErrorMessage(e)}`);
+    }
+  }
+
   // =========================================================================
   // ACTION DISPATCHER
   // =========================================================================
@@ -684,6 +1262,8 @@ define(["N/log", "N/query", "N/record", "N/runtime", "N/search"], (
     [MCP_ACTION.RUN_FUNCTION]: handleRunFunction,
     [MCP_ACTION.RECORD_SAMPLE]: handleRecordSample,
     [MCP_ACTION.CREATE_RECORD]: handleCreateRecord,
+    [MCP_ACTION.GET_SUPPORTED_LOCALES]: handleGetSupportedLocales,
+    [MCP_ACTION.GET_TRANSLATIONS]: handleGetTranslations,
   };
 
   /**

@@ -11,6 +11,7 @@ const execAsync = util.promisify(exec);
 export interface DeployConfig {
     objects?: string[];
     files?: string[];
+    translations?: string[];
 }
 
 export interface ManifestDependencies {
@@ -56,6 +57,14 @@ export const writeTemporaryDeployXml = async (projectRoot: string, config: Deplo
             tempXml += `        <path>${p}</path>\n`;
         });
         tempXml += `    </files>\n`;
+    }
+
+    if (config.translations && config.translations.length > 0) {
+        tempXml += `    <translationimports>\n`;
+        config.translations.forEach(p => {
+            tempXml += `        <path>${p}</path>\n`;
+        });
+        tempXml += `    </translationimports>\n`;
     }
 
     tempXml += `</deploy>`;

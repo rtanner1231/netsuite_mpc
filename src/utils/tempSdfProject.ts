@@ -56,6 +56,8 @@ export interface TempSdfProject {
     suiteScriptsDir: string;
     /** Path to `<tempDir>/Objects`. */
     objectsDir: string;
+    /** Path to `<tempDir>/Translations`. */
+    translationsDir: string;
     /** Path to `<tempDir>/manifest.xml`. */
     manifestXmlPath: string;
     /** Path to `<tempDir>/deploy.xml`. */
@@ -66,7 +68,7 @@ export interface TempSdfProject {
     environment: string;
     /** The SDF Auth ID configured in `<tempDir>/project.json`. */
     sdfId: string;
-    /** Updates `<tempDir>/deploy.xml` with specific files and/or objects. */
+    /** Updates `<tempDir>/deploy.xml` with specific files, objects, and/or translations. */
     setDeployConfig: (config: DeployConfig) => Promise<void>;
     /** Adds object dependencies to `<tempDir>/manifest.xml`. */
     addManifestDependencies: (dependencies: ManifestDependencies) => Promise<void>;
@@ -74,6 +76,8 @@ export interface TempSdfProject {
     getLocalFileCabinetPath: (fileCabinetPath: string) => string;
     /** Resolves an object scriptId (and optional subfolder) to its local XML path inside `<tempDir>/Objects`. */
     getLocalObjectPath: (scriptId: string, subFolder?: string) => string;
+    /** Resolves a translation collection scriptId and locale (e.g., `es-ES`) to its local XLF path inside `<tempDir>/Translations`. */
+    getLocalTranslationPath: (scriptId: string, locale: string) => string;
     /** Removes the temporary directory and all its contents. */
     cleanup: () => Promise<void>;
 }
@@ -139,13 +143,15 @@ export const createTempSdfProject = async (
         const fileCabinetDir = path.join(tempDir, "FileCabinet");
         const suiteScriptsDir = path.join(fileCabinetDir, "SuiteScripts");
         const objectsDir = path.join(tempDir, "Objects");
+        const translationsDir = path.join(tempDir, "Translations");
         const manifestXmlPath = path.join(tempDir, "manifest.xml");
         const deployXmlPath = path.join(tempDir, "deploy.xml");
         const projectJsonPath = path.join(tempDir, "project.json");
 
         await Promise.all([
             fs.mkdir(suiteScriptsDir, { recursive: true }),
-            fs.mkdir(objectsDir, { recursive: true })
+            fs.mkdir(objectsDir, { recursive: true }),
+            fs.mkdir(translationsDir, { recursive: true })
         ]);
 
         // 1. Write project.json with defaultAuthId
@@ -210,6 +216,13 @@ export const createTempSdfProject = async (
                 : path.join(objectsDir, fileName);
         };
 
+        const getLocalTranslationPath = (scriptId: string, locale: string): string => {
+            const baseId = scriptId.toLowerCase().endsWith(".xml") ? scriptId.slice(0, -4) : scriptId;
+            const normalizedLocale = locale.trim().replace(/_/g, "-");
+            const fileName = `${baseId}.${normalizedLocale}.xlf`;
+            return path.join(translationsDir, fileName);
+        };
+
         const cleanup = async (): Promise<void> => {
             try {
                 await fs.rm(tempDir, { recursive: true, force: true });
@@ -223,6 +236,7 @@ export const createTempSdfProject = async (
             fileCabinetDir,
             suiteScriptsDir,
             objectsDir,
+            translationsDir,
             manifestXmlPath,
             deployXmlPath,
             projectJsonPath,
@@ -232,6 +246,7 @@ export const createTempSdfProject = async (
             addManifestDependencies,
             getLocalFileCabinetPath,
             getLocalObjectPath,
+            getLocalTranslationPath,
             cleanup
         };
     } catch (error) {

@@ -19,6 +19,11 @@ import { getRelatedTablesTool } from "./getRelatedTables.js";
 import { listEnvironmentsTool } from "./listEnvironments.js";
 import { switchEnvironmentTool } from "./switchEnvironment.js";
 import { openSettingsTool } from "./openSettings.js";
+import { listSupportedLocalesTool } from "./listSupportedLocales.js";
+import { listTranslationCollectionsTool } from "./listTranslationCollections.js";
+import { viewTranslationCollectionTool } from "./viewTranslationCollection.js";
+import { createTranslationCollectionTool } from "./createTranslationCollection.js";
+import { updateTranslationCollectionTool } from "./updateTranslationCollection.js";
 
 export const toolsRegistry = [
     listEnvironmentsTool,
@@ -36,6 +41,11 @@ export const toolsRegistry = [
     createCustomRecordTool,
     createCustomListTool,
     updateCustomRecordTool,
+    listSupportedLocalesTool,
+    listTranslationCollectionsTool,
+    viewTranslationCollectionTool,
+    createTranslationCollectionTool,
+    updateTranslationCollectionTool,
     rebuildVectorDatabaseTool,
     rebuildVectorDatabaseStatusTool,
     searchTablesTool,
