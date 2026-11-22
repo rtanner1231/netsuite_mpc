@@ -12,6 +12,7 @@ import { EnvironmentConfig, getEnvironmentConfig, getToolDisableReason } from ".
 import { getProjectRoot } from "./utils/mcp.js";
 import { resolveEffectiveSaveToProject } from "./utils/project.js";
 import { getSaveToProjectSchemaProperty } from "./utils/objects.js";
+import { resumeSettingsServerIfPersisted } from "./utils/settingsServer.js";
 
 const server = new Server(
     { name: "NetSuite Schema Provider TS", version: "1.0.0" },
@@ -126,6 +127,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function run() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
+    void resumeSettingsServerIfPersisted(server, () => toolsRegistry);
     console.error("NetSuite MCP Server (TS) running on stdio");
 }
 

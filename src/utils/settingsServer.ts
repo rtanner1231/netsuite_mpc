@@ -28,27 +28,56 @@ interface SettingsServerInstance {
     port: number;
     token: string;
     url: string;
-    inactivityTimer: NodeJS.Timeout;
+}
+
+interface PersistedSettingsSession {
+    port: number;
+    token: string;
+    updatedAt: number;
 }
 
 let activeInstance: SettingsServerInstance | null = null;
-const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const DEFAULT_SETTINGS_PORT = 45821;
+const SESSION_FILE_PATH = path.join(MCP_DIR, ".settings-session.json");
 const MAX_JSON_BODY_BYTES = 5 * 1024 * 1024; // 5 MB
 const MAX_SQLITE_BODY_BYTES = 250 * 1024 * 1024; // 250 MB
 
-const resetInactivityTimer = (instance: SettingsServerInstance) => {
-    clearTimeout(instance.inactivityTimer);
-    instance.inactivityTimer = setTimeout(() => {
-        try {
-            instance.server.close();
-        } catch {
-            // ignore
+const readPersistedSession = async (): Promise<PersistedSettingsSession | null> => {
+    try {
+        const raw = await fs.readFile(SESSION_FILE_PATH, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (
+            parsed &&
+            typeof parsed.port === "number" &&
+            parsed.port > 0 &&
+            parsed.port < 65536 &&
+            typeof parsed.token === "string" &&
+            parsed.token.length >= 16
+        ) {
+            return {
+                port: parsed.port,
+                token: parsed.token,
+                updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : Date.now()
+            };
         }
-        if (activeInstance === instance) {
-            activeInstance = null;
-        }
-    }, INACTIVITY_TIMEOUT_MS);
-    instance.inactivityTimer.unref?.();
+        return null;
+    } catch {
+        return null;
+    }
+};
+
+const writePersistedSession = async (port: number, token: string): Promise<void> => {
+    try {
+        await fs.mkdir(MCP_DIR, { recursive: true });
+        const payload: PersistedSettingsSession = {
+            port,
+            token,
+            updatedAt: Date.now()
+        };
+        await fs.writeFile(SESSION_FILE_PATH, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    } catch {
+        // Non-fatal if config dir cannot be written before first save
+    }
 };
 
 export const openUrlInBrowser = (url: string): Promise<boolean> => {
@@ -225,23 +254,53 @@ const getEnvironmentDatabaseStatus = async (envNameRaw: string) => {
     };
 };
 
-export const startOrGetSettingsServer = async (
+const tryListenOnPort = (httpServer: http.Server, port: number): Promise<number> => {
+    return new Promise((resolve, reject) => {
+        const onError = (err: any) => {
+            httpServer.removeListener("listening", onListening);
+            reject(err);
+        };
+        const onListening = () => {
+            httpServer.removeListener("error", onError);
+            const addr = httpServer.address();
+            if (addr && typeof addr === "object") {
+                resolve(addr.port);
+            } else {
+                reject(new Error("Failed to bind local settings server port"));
+            }
+        };
+        httpServer.once("error", onError);
+        httpServer.once("listening", onListening);
+        httpServer.listen(port, "127.0.0.1");
+    });
+};
+
+const bindSettingsHttpServer = async (httpServer: http.Server, preferredPort: number): Promise<number> => {
+    const candidatePorts = Array.from(new Set([preferredPort, DEFAULT_SETTINGS_PORT, 0]));
+    let lastError: any = null;
+    for (const candidate of candidatePorts) {
+        try {
+            return await tryListenOnPort(httpServer, candidate);
+        } catch (err: any) {
+            lastError = err;
+        }
+    }
+    throw lastError || new Error("Failed to bind local settings server port");
+};
+
+const ensureSettingsServerRunning = async (
     mcpServer: Server,
     getToolsRegistry: () => ToolDefinition[]
-): Promise<{ url: string; browserOpened: boolean }> => {
+): Promise<SettingsServerInstance> => {
     if (activeInstance) {
-        resetInactivityTimer(activeInstance);
-        const browserOpened = await openUrlInBrowser(activeInstance.url);
-        return { url: activeInstance.url, browserOpened };
+        return activeInstance;
     }
 
-    const token = crypto.randomBytes(24).toString("hex");
+    const persisted = await readPersistedSession();
+    const token = persisted?.token || crypto.randomBytes(24).toString("hex");
+    const preferredPort = persisted?.port || DEFAULT_SETTINGS_PORT;
 
     const httpServer = http.createServer(async (req, res) => {
-        if (activeInstance) {
-            resetInactivityTimer(activeInstance);
-        }
-
         try {
             const parsedUrl = new URL(req.url || "/", "http://127.0.0.1");
             const reqToken = parsedUrl.searchParams.get("token");
@@ -258,6 +317,15 @@ export const startOrGetSettingsServer = async (
                     "Cache-Control": "no-store"
                 });
                 res.end(html);
+                return;
+            }
+
+            if (req.method === "GET" && parsedUrl.pathname === "/api/ping") {
+                sendJson(res, 200, {
+                    success: true,
+                    pid: process.pid,
+                    timestamp: Date.now()
+                });
                 return;
             }
 
@@ -517,6 +585,9 @@ export const startOrGetSettingsServer = async (
                 await saveAllEnvironments(cleanedEnvironments);
                 await setOrClearActiveEnvironment(targetActive);
                 await saveAppConfig(appConfig);
+                if (activeInstance) {
+                    await writePersistedSession(activeInstance.port, activeInstance.token);
+                }
 
                 try {
                     await mcpServer.sendToolListChanged();
@@ -594,31 +665,47 @@ export const startOrGetSettingsServer = async (
         }
     });
 
-    const port = await new Promise<number>((resolve, reject) => {
-        httpServer.once("error", reject);
-        httpServer.listen(0, "127.0.0.1", () => {
-            const addr = httpServer.address();
-            if (addr && typeof addr === "object") {
-                resolve(addr.port);
-            } else {
-                reject(new Error("Failed to bind local settings server port"));
-            }
-        });
-    });
+    const port = await bindSettingsHttpServer(httpServer, preferredPort);
+    // Unref so the HTTP server never prevents the MCP process from exiting cleanly when stdio closes
+    httpServer.unref();
 
     const url = `http://127.0.0.1:${port}/?token=${token}`;
-    const placeholderTimeout = setTimeout(() => {}, INACTIVITY_TIMEOUT_MS);
-
     const instance: SettingsServerInstance = {
         server: httpServer,
         port,
         token,
-        url,
-        inactivityTimer: placeholderTimeout
+        url
     };
     activeInstance = instance;
-    resetInactivityTimer(instance);
+    await writePersistedSession(port, token);
 
-    const browserOpened = await openUrlInBrowser(url);
-    return { url, browserOpened };
+    return instance;
+};
+
+/**
+ * Automatically resumes the settings HTTP server on MCP startup if a previous settings session file exists.
+ * This ensures that an already-open browser tab continues working seamlessly across MCP restarts.
+ */
+export const resumeSettingsServerIfPersisted = async (
+    mcpServer: Server,
+    getToolsRegistry: () => ToolDefinition[]
+): Promise<void> => {
+    const persisted = await readPersistedSession();
+    if (!persisted) {
+        return;
+    }
+    try {
+        await ensureSettingsServerRunning(mcpServer, getToolsRegistry);
+    } catch (err: any) {
+        console.error(`Warning: Could not auto-resume settings server: ${err?.message || err}`);
+    }
+};
+
+export const startOrGetSettingsServer = async (
+    mcpServer: Server,
+    getToolsRegistry: () => ToolDefinition[]
+): Promise<{ url: string; browserOpened: boolean }> => {
+    const instance = await ensureSettingsServerRunning(mcpServer, getToolsRegistry);
+    const browserOpened = await openUrlInBrowser(instance.url);
+    return { url: instance.url, browserOpened };
 };

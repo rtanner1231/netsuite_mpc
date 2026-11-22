@@ -82,6 +82,32 @@ export const renderSettingsHtml = (token: string): string => {
         .unsaved-pill.visible {
             display: inline-block;
         }
+        .conn-pill {
+            font-size: 0.76rem;
+            padding: 4px 10px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid var(--border-color);
+            background: rgba(15, 23, 42, 0.5);
+            color: var(--text-secondary);
+        }
+        .conn-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            display: inline-block;
+        }
+        .conn-pill.offline {
+            background: var(--danger-bg);
+            border-color: rgba(239, 68, 68, 0.4);
+            color: #fca5a5;
+        }
+        .conn-pill.offline .conn-dot {
+            background: var(--danger);
+        }
         .btn {
             padding: 8px 16px;
             border-radius: 6px;
@@ -629,6 +655,10 @@ export const renderSettingsHtml = (token: string): string => {
             <div class="config-path" id="configDirDisplay">Loading configuration path...</div>
         </div>
         <div class="header-actions">
+            <span class="conn-pill" id="connPill" title="Local settings server connection status">
+                <span class="conn-dot"></span>
+                <span id="connPillText">Connected</span>
+            </span>
             <span class="unsaved-pill" id="unsavedPill">Unsaved changes</span>
             <button class="btn btn-primary" id="saveBtn" onclick="saveAllSettings()">Save Changes</button>
         </div>
@@ -1726,6 +1756,36 @@ export const renderSettingsHtml = (token: string): string => {
                 e.returnValue = "";
             }
         });
+
+        let lastServerPid = null;
+        async function checkServerHeartbeat() {
+            const pill = document.getElementById("connPill");
+            const text = document.getElementById("connPillText");
+            try {
+                const res = await fetch("/api/ping?token=" + encodeURIComponent(SESSION_TOKEN));
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                const data = await res.json();
+                if (pill && text) {
+                    pill.classList.remove("offline");
+                    text.textContent = "Connected";
+                }
+                if (lastServerPid !== null && data.pid && data.pid !== lastServerPid && !isDirty) {
+                    // Server process restarted and no unsaved local edits exist; refresh schema/state
+                    lastServerPid = data.pid;
+                    void loadSettings();
+                } else if (data.pid) {
+                    lastServerPid = data.pid;
+                }
+            } catch {
+                if (pill && text) {
+                    pill.classList.add("offline");
+                    text.textContent = "Server Offline (waiting for MCP...)";
+                }
+            }
+        }
+
+        setInterval(checkServerHeartbeat, 20000);
+        void checkServerHeartbeat();
 
         loadSettings();
     </script>
