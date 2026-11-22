@@ -8,9 +8,10 @@ The NetSuite Model Context Protocol (MCP) Server is a powerful bridge that allow
 
 The server exposes the following MCP tools to interact directly with NetSuite, organized by category:
 
-### 1. Environment Management
-*(Always available, even before `state.json` is initialized)*
+### 1. Environment & Settings Management
+*(Always available, even before `env.json` or `state.json` is initialized)*
 
+- **`netsuite_open_settings`**: Launch a local graphical web interface in your browser to add, edit, or delete NetSuite environments, test OAuth/RESTlet connections, upload SQLite schema databases (`.db`) and trigger LanceDB vector database (`.lance`) rebuilds with live progress, configure per-environment tool permissions (`disableDestructive`, `disableSdf`, and individual tool toggles), and customize global `config.json` defaults. Automatically creates the configuration directory and files on first save.
 - **`netsuite_list_environments`**: List all configured NetSuite environments from `env.json` and indicate which environment is currently active.
 - **`netsuite_switch_environment`**: Switch the active NetSuite environment by updating (or initializing) `state.json`, re-evaluating environment-specific tool restrictions (`disableDestructive`, `disableSdf`, `disabledTools`), and notifying the MCP client that available tools may have changed.
 
@@ -107,18 +108,34 @@ Several MCP tools (`netsuite_run_suite_ql`, `netsuite_get_script_logs`, `netsuit
 
 ## Configuration
 
-The NetSuite MCP Server uses configuration files stored in your operating system's standard application data directory.
+The NetSuite MCP Server uses configuration files stored in your operating system's standard application data directory:
 
 - **Windows:** `%APPDATA%\netsuite_mcp\`
 - **macOS / Linux:** `~/.config/netsuite_mcp/`
 
-You will need to manually set up the files in this directory before running the server.
+### Graphical Settings UI (`netsuite_open_settings`) — Recommended
+
+You do not need to create the configuration folder or edit JSON files by hand. After installing and starting the MCP server, simply ask your AI assistant to **open the NetSuite settings** (which invokes `netsuite_open_settings`).
+
+This launches a local web interface in your browser where you can:
+- **Create, rename, edit, and delete environments** (`env.json`) and set the **active environment** (`state.json`).
+- **Test connections** directly from the form to verify your OAuth 1.0a credentials and MCP RESTlet deployment before saving.
+- **Load SQLite schema databases & build Vector databases:** Pick any `.db` file exported from `MCPSchemaLoad.html` via a file picker—the UI validates the schema, moves it into the configuration directory, and renames it to `<Environment>.db` automatically. You can also trigger and monitor the `<Environment>.lance` vector database build with a live progress bar right from the settings page.
+- **Manage tool permissions** per environment with top-level switches for `disableDestructive` and `disableSdf`, plus an expandable **Individual Tool Permissions** section to toggle specific tools on or off.
+- **Customize global & SDF object defaults** (`config.json`) for project build/upload behavior and SDF XML defaults (`RECORD`, `FIELD`, and `LIST`).
+- **Zero-config initialization:** Clicking **Save Changes** automatically creates the configuration directory and writes `env.json`, `state.json`, and `config.json`, then notifies the MCP client that the tool list has updated. *(Note: If your AI client/harness does not immediately reflect newly enabled or disabled tools, toggle the MCP server off and on again.)*
+
+---
+
+### Manual Configuration Reference
+
+If you prefer to create or edit the configuration files manually in the configuration directory, use the formats below.
 
 ### 1. The `state.json` File
 
 The `state.json` file acts as a switch to determine which NetSuite environment you are currently targeting (e.g., Sandbox, Production).
 
-You can either create this file manually or let the MCP server initialize and update it using the **`netsuite_switch_environment`** tool (if `state.json` does not exist yet, only `netsuite_list_environments` and `netsuite_switch_environment` will be exposed until an environment is selected).
+You can create this file manually or let the MCP server initialize and update it using **`netsuite_open_settings`** or **`netsuite_switch_environment`** (if `state.json` does not exist yet, only `netsuite_open_settings`, `netsuite_list_environments`, and `netsuite_switch_environment` will be exposed until an environment is selected).
 
 To create `state.json` manually in the configuration directory, use the following structure:
 
@@ -238,7 +255,8 @@ The MCP server looks for the SQLite file in your configuration directory (`MCP_D
      1. Select **Full Schema Export**.
      2. In **Filename (without extension)**, enter your target environment name (e.g., `Prod` or `Sandbox`) so that the output file is named `Prod.db` or `Sandbox.db`.
      3. Click **Run Extraction** and wait for the progress bar to reach `100%` (*Ready for Download*).
-     4. Click **Download SQLite Database** and move the downloaded `<environment>.db` file into your `netsuite_mcp` configuration directory.
+     4. Click **Download SQLite Database**.
+     5. Open the Settings UI via **`netsuite_open_settings`** and click **Load SQLite Database (.db)...** on your environment to select the downloaded file (which automatically validates, places, and renames it to `<environment>.db`), or manually move the `<environment>.db` file into your `netsuite_mcp` configuration directory.
 
 2. **Update All Custom Records:**
    - Refreshes all custom record types and custom fields in an existing `.db` file via SuiteQL without re-downloading all native NetSuite tables.
@@ -257,7 +275,7 @@ The MCP server looks for the SQLite file in your configuration directory (`MCP_D
      3. Enter the script/table ID in **Table Name (to update/insert)**.
      4. Click **Run Extraction** (and download the updated file if not linked in-place).
 
-> **Tip:** After generating or updating `<environment>.db`, run the `netsuite_rebuild_vector_database` MCP tool (and check progress with `netsuite_rebuild_vector_database_status`) to generate the corresponding `<environment>.lance` vector database used by `netsuite_search_tables`.
+> **Tip:** After generating or updating `<environment>.db`, click **Build / Rebuild Vector Database (.lance)** in the Settings UI (`netsuite_open_settings`)—or run the `netsuite_rebuild_vector_database` MCP tool—to generate the corresponding `<environment>.lance` vector database used by `netsuite_search_tables`.
 
 ## NetSuite Setup Requirements
 

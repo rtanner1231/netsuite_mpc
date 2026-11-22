@@ -161,6 +161,70 @@ export const getToolDisableReason = (tool: ToolDefinition, config: EnvironmentCo
     return null;
 };
 
+export const getAllEnvironmentsOrEmpty = async (): Promise<Record<string, EnvironmentConfig>> => {
+    try {
+        const envFile = await fs.readFile(ENV_PATH, "utf-8");
+        const parsed = JSON.parse(envFile);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return {};
+        }
+        return parsed as Record<string, EnvironmentConfig>;
+    } catch (error: any) {
+        if (error.code === "ENOENT") {
+            return {};
+        }
+        throw new Error(`Failed to read env.json at ${ENV_PATH}: ${error.message}`);
+    }
+};
+
+export const saveAllEnvironments = async (environments: Record<string, EnvironmentConfig>): Promise<void> => {
+    await fs.mkdir(MCP_DIR, { recursive: true });
+    await fs.writeFile(ENV_PATH, JSON.stringify(environments, null, 2) + "\n", "utf-8");
+};
+
+export const setOrClearActiveEnvironment = async (environment: string | null): Promise<void> => {
+    let existingState: Record<string, any> = {};
+    try {
+        const fileData = await fs.readFile(CONFIG_PATH, "utf-8");
+        const parsed = JSON.parse(fileData);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            existingState = parsed;
+        }
+    } catch (error: any) {
+        if (error.code !== "ENOENT") {
+            throw new Error(`Failed to read existing state.json at ${CONFIG_PATH}: ${error.message}`);
+        }
+    }
+
+    await fs.mkdir(MCP_DIR, { recursive: true });
+    const updatedState = {
+        ...existingState,
+        environment: environment && environment.trim() !== "" ? environment.trim() : ""
+    };
+    await fs.writeFile(CONFIG_PATH, JSON.stringify(updatedState, null, 2) + "\n", "utf-8");
+};
+
+export const getAppConfigOrEmpty = async (): Promise<Record<string, any>> => {
+    try {
+        const fileData = await fs.readFile(APP_CONFIG_PATH, "utf-8");
+        const parsed = JSON.parse(fileData);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            return parsed;
+        }
+        return {};
+    } catch (error: any) {
+        if (error.code === "ENOENT") {
+            return {};
+        }
+        throw new Error(`Failed to read config.json at ${APP_CONFIG_PATH}: ${error.message}`);
+    }
+};
+
+export const saveAppConfig = async (appConfig: Record<string, any>): Promise<void> => {
+    await fs.mkdir(MCP_DIR, { recursive: true });
+    await fs.writeFile(APP_CONFIG_PATH, JSON.stringify(appConfig, null, 2) + "\n", "utf-8");
+};
+
 /**
  * Get the user defaults for a specific type of object
  * return null if no defaults are found

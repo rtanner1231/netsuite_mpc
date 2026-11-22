@@ -222,7 +222,7 @@ export async function rebuildVectorDatabaseForPaths(
     };
 }
 
-function startBackgroundRebuild(
+export function startBackgroundRebuild(
     environment: string,
     sqlitePath: string,
     lancePath: string

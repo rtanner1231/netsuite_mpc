@@ -3,9 +3,12 @@ import crypto from "crypto";
 import OAuth from "oauth-1.0a";
 import { getActiveEnvironment, ENV_PATH } from "./config.js";
 
-export const callNetsuiteRestlet = async (payload: Record<string, any>): Promise<any> => {
-    const creds = await getCredentials();
-    const url = `https://${creds.accountId}.restlets.api.netsuite.com/app/site/hosting/restlet.nl?script=${creds.scriptId}&deploy=${creds.deploymentId}`;
+export const callNetsuiteRestletWithCredentials = async (
+    creds: Record<string, any>,
+    payload: Record<string, any>
+): Promise<any> => {
+    const accountId = String(creds.accountId || "").trim();
+    const url = `https://${accountId}.restlets.api.netsuite.com/app/site/hosting/restlet.nl?script=${creds.scriptId}&deploy=${creds.deploymentId}`;
 
     const headers = generateOAuthHeaders(url, 'POST', creds);
     headers['Content-Type'] = 'application/json';
@@ -22,6 +25,11 @@ export const callNetsuiteRestlet = async (payload: Record<string, any>): Promise
     }
 
     return await response.json();
+};
+
+export const callNetsuiteRestlet = async (payload: Record<string, any>): Promise<any> => {
+    const creds = await getCredentials();
+    return callNetsuiteRestletWithCredentials(creds, payload);
 };
 
 async function getCredentials() {

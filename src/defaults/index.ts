@@ -7,7 +7,7 @@ import { fieldDefaults } from "./objectDefaults/fieldDefaults.js";
 import { getUserDefaults } from "../utils/config.js";
 import { listDefaults } from "./objectDefaults/listDefaults.js";
 
-const projectDefaultsMap: Record<ObjectDefaultType, Record<string, any>> = {
+export const projectDefaultsMap: Record<ObjectDefaultType, Record<string, any>> = {
     [ObjectDefaultType.RECORD]: recordDefaults,
     [ObjectDefaultType.FIELD]: fieldDefaults,
     [ObjectDefaultType.LIST]: listDefaults
