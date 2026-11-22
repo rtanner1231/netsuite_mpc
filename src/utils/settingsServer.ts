@@ -9,6 +9,9 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { ToolDefinition } from "../types/index.js";
 import {
     MCP_DIR,
+    APP_CONFIG_PATH,
+    CONFIG_PATH,
+    ENV_PATH,
     EnvironmentConfig,
     getActiveEnvironmentOrNull,
     getAllEnvironmentsOrEmpty,
@@ -37,10 +40,55 @@ interface PersistedSettingsSession {
 }
 
 let activeInstance: SettingsServerInstance | null = null;
+const sseClients = new Set<http.ServerResponse>();
 const DEFAULT_SETTINGS_PORT = 45821;
 const SESSION_FILE_PATH = path.join(MCP_DIR, ".settings-session.json");
 const MAX_JSON_BODY_BYTES = 5 * 1024 * 1024; // 5 MB
 const MAX_SQLITE_BODY_BYTES = 250 * 1024 * 1024; // 250 MB
+
+export const computeConfigVersionHash = async (): Promise<string> => {
+    const readSafe = async (filePath: string): Promise<string> => {
+        try {
+            return await fs.readFile(filePath, "utf-8");
+        } catch {
+            return "";
+        }
+    };
+    const [stateContent, envContent, appConfigContent] = await Promise.all([
+        readSafe(CONFIG_PATH),
+        readSafe(ENV_PATH),
+        readSafe(APP_CONFIG_PATH)
+    ]);
+    return crypto
+        .createHash("sha1")
+        .update(`${stateContent}\n---ENV---\n${envContent}\n---CFG---\n${appConfigContent}`)
+        .digest("hex");
+};
+
+export const notifySettingsClientsOfConfigChange = async (): Promise<void> => {
+    if (sseClients.size === 0) return;
+    try {
+        const [configVersion, activeEnvironment] = await Promise.all([
+            computeConfigVersionHash(),
+            getActiveEnvironmentOrNull().catch(() => null)
+        ]);
+        const payload = JSON.stringify({
+            type: "config-changed",
+            configVersion,
+            activeEnvironment,
+            timestamp: Date.now()
+        });
+        for (const client of Array.from(sseClients)) {
+            try {
+                client.write(`data: ${payload}\n\n`);
+            } catch {
+                sseClients.delete(client);
+            }
+        }
+    } catch {
+        // Ignore broadcast errors
+    }
+};
 
 const readPersistedSession = async (): Promise<PersistedSettingsSession | null> => {
     try {
@@ -321,19 +369,52 @@ const ensureSettingsServerRunning = async (
             }
 
             if (req.method === "GET" && parsedUrl.pathname === "/api/ping") {
+                const [configVersion, activeEnvironment] = await Promise.all([
+                    computeConfigVersionHash(),
+                    getActiveEnvironmentOrNull().catch(() => null)
+                ]);
                 sendJson(res, 200, {
                     success: true,
                     pid: process.pid,
+                    configVersion,
+                    activeEnvironment,
                     timestamp: Date.now()
                 });
                 return;
             }
 
+            if (req.method === "GET" && parsedUrl.pathname === "/api/events") {
+                res.writeHead(200, {
+                    "Content-Type": "text/event-stream; charset=utf-8",
+                    "Cache-Control": "no-cache, no-transform",
+                    "Connection": "keep-alive"
+                });
+                const [configVersion, activeEnvironment] = await Promise.all([
+                    computeConfigVersionHash(),
+                    getActiveEnvironmentOrNull().catch(() => null)
+                ]);
+                res.write(
+                    `data: ${JSON.stringify({
+                        type: "connected",
+                        pid: process.pid,
+                        configVersion,
+                        activeEnvironment,
+                        timestamp: Date.now()
+                    })}\n\n`
+                );
+                sseClients.add(res);
+                req.on("close", () => {
+                    sseClients.delete(res);
+                });
+                return;
+            }
+
             if (req.method === "GET" && parsedUrl.pathname === "/api/settings") {
-                const [activeEnvironment, environments, appConfig] = await Promise.all([
+                const [activeEnvironment, environments, appConfig, configVersion] = await Promise.all([
                     getActiveEnvironmentOrNull().catch(() => null),
                     getAllEnvironmentsOrEmpty().catch(() => ({})),
-                    getAppConfigOrEmpty().catch(() => ({}))
+                    getAppConfigOrEmpty().catch(() => ({})),
+                    computeConfigVersionHash()
                 ]);
 
                 const tools = getToolsRegistry()
@@ -347,6 +428,7 @@ const ensureSettingsServerRunning = async (
 
                 sendJson(res, 200, {
                     configDir: MCP_DIR,
+                    configVersion,
                     activeEnvironment,
                     environments,
                     appConfig,
@@ -476,6 +558,32 @@ const ensureSettingsServerRunning = async (
                 return;
             }
 
+            if (req.method === "POST" && parsedUrl.pathname === "/api/active-environment") {
+                const rawBody = await readRequestBody(req);
+                const payload = JSON.parse(rawBody);
+                const targetActive =
+                    typeof payload?.activeEnvironment === "string" && payload.activeEnvironment.trim() !== ""
+                        ? payload.activeEnvironment.trim()
+                        : null;
+
+                await setOrClearActiveEnvironment(targetActive);
+                const configVersion = await computeConfigVersionHash();
+
+                try {
+                    await mcpServer.sendToolListChanged();
+                } catch (notifyErr: any) {
+                    console.error(`Warning: Failed to send tool list changed notification: ${notifyErr?.message || notifyErr}`);
+                }
+                void notifySettingsClientsOfConfigChange();
+
+                sendJson(res, 200, {
+                    success: true,
+                    activeEnvironment: targetActive,
+                    configVersion
+                });
+                return;
+            }
+
             if (req.method === "POST" && parsedUrl.pathname === "/api/settings") {
                 const rawBody = await readRequestBody(req);
                 const payload = JSON.parse(rawBody);
@@ -588,16 +696,19 @@ const ensureSettingsServerRunning = async (
                 if (activeInstance) {
                     await writePersistedSession(activeInstance.port, activeInstance.token);
                 }
+                const configVersion = await computeConfigVersionHash();
 
                 try {
                     await mcpServer.sendToolListChanged();
                 } catch (notifyErr: any) {
                     console.error(`Warning: Failed to send tool list changed notification: ${notifyErr?.message || notifyErr}`);
                 }
+                void notifySettingsClientsOfConfigChange();
 
                 sendJson(res, 200, {
                     success: true,
-                    activeEnvironment: targetActive
+                    activeEnvironment: targetActive,
+                    configVersion
                 });
                 return;
             }

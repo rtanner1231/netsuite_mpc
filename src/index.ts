@@ -1,3 +1,5 @@
+import fs from "fs";
+import fsPromises from "fs/promises";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -8,11 +10,22 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { promptsRegistry } from "./prompts/index.js";
 import { toolsRegistry } from "./tools/index.js";
-import { EnvironmentConfig, getEnvironmentConfig, getToolDisableReason } from "./utils/config.js";
+import {
+    APP_CONFIG_PATH,
+    CONFIG_PATH,
+    ENV_PATH,
+    EnvironmentConfig,
+    MCP_DIR,
+    getEnvironmentConfig,
+    getToolDisableReason
+} from "./utils/config.js";
 import { getProjectRoot } from "./utils/mcp.js";
 import { resolveEffectiveSaveToProject } from "./utils/project.js";
 import { getSaveToProjectSchemaProperty } from "./utils/objects.js";
-import { resumeSettingsServerIfPersisted } from "./utils/settingsServer.js";
+import {
+    notifySettingsClientsOfConfigChange,
+    resumeSettingsServerIfPersisted
+} from "./utils/settingsServer.js";
 
 const server = new Server(
     { name: "NetSuite Schema Provider TS", version: "1.0.0" },
@@ -123,11 +136,80 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 });
 
+const computeConfigFilesSignature = async (): Promise<string> => {
+    const readSafe = async (filePath: string): Promise<string> => {
+        try {
+            return await fsPromises.readFile(filePath, "utf-8");
+        } catch {
+            return "";
+        }
+    };
+    const [stateContent, envContent, appConfigContent] = await Promise.all([
+        readSafe(CONFIG_PATH),
+        readSafe(ENV_PATH),
+        readSafe(APP_CONFIG_PATH)
+    ]);
+    return `${stateContent}\n---ENV---\n${envContent}\n---CFG---\n${appConfigContent}`;
+};
+
+const startConfigWatcher = async (mcpServer: Server): Promise<void> => {
+    try {
+        await fsPromises.mkdir(MCP_DIR, { recursive: true });
+    } catch {
+        // Ignore if directory cannot be created yet
+    }
+
+    let lastSignature = await computeConfigFilesSignature();
+    let debounceTimer: NodeJS.Timeout | null = null;
+
+    const checkAndNotify = async () => {
+        try {
+            const currentSignature = await computeConfigFilesSignature();
+            if (currentSignature !== lastSignature) {
+                lastSignature = currentSignature;
+                await mcpServer.sendToolListChanged();
+                void notifySettingsClientsOfConfigChange();
+            }
+        } catch (err: any) {
+            console.error(`Warning: Config watcher failed to send tool list changed notification: ${err?.message || err}`);
+        }
+    };
+
+    try {
+        const watcher = fs.watch(MCP_DIR, (_eventType, filename) => {
+            if (filename && filename !== "state.json" && filename !== "env.json" && filename !== "config.json") {
+                return;
+            }
+            if (debounceTimer) {
+                clearTimeout(debounceTimer);
+            }
+            debounceTimer = setTimeout(() => {
+                void checkAndNotify();
+            }, 100);
+        });
+        watcher.unref();
+    } catch (err: any) {
+        console.error(`Warning: Could not start fs.watch on ${MCP_DIR}: ${err?.message || err}`);
+    }
+
+    // Periodic fallback check (every 2 seconds) in case atomic file renames or OS fs.watch quirks miss an event
+    const pollInterval = setInterval(() => {
+        void checkAndNotify();
+    }, 2000);
+    pollInterval.unref();
+};
+
 // Boot up transport
 async function run() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
     void resumeSettingsServerIfPersisted(server, () => toolsRegistry);
+    void startConfigWatcher(server);
+
+    // Ensure the process exits cleanly if the client closes stdio
+    process.stdin.on("end", () => process.exit(0));
+    process.stdin.on("close", () => process.exit(0));
+
     console.error("NetSuite MCP Server (TS) running on stdio");
 }
 

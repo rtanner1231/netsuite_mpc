@@ -715,6 +715,7 @@ export const renderSettingsHtml = (token: string): string => {
         let selectedEnvName = null;
         let selectedGlobalSectionId = null;
         let isDirty = false;
+        let lastConfigVersion = null;
         let pendingRenames = []; // [{ from, to }]
         let envDbStatusCache = {}; // { [envName]: statusObj }
         let dbPollTimer = null;
@@ -750,18 +751,26 @@ export const renderSettingsHtml = (token: string): string => {
             });
         }
 
-        async function loadSettings() {
+        async function loadSettings(preserveSelection = false) {
             try {
                 const res = await fetch("/api/settings?token=" + encodeURIComponent(SESSION_TOKEN));
                 if (!res.ok) {
                     throw new Error("HTTP " + res.status);
                 }
                 const data = await res.json();
+                const prevSelectedEnv = selectedEnvName;
+                const detailsWasOpen = document.getElementById("individualToolsDetails")?.open;
+
                 appState = data;
+                if (data.configVersion) {
+                    lastConfigVersion = data.configVersion;
+                }
                 document.getElementById("configDirDisplay").textContent = "Config folder: " + data.configDir;
 
                 const envNames = Object.keys(appState.environments);
-                if (appState.activeEnvironment && appState.environments[appState.activeEnvironment]) {
+                if (preserveSelection && prevSelectedEnv && appState.environments[prevSelectedEnv]) {
+                    selectedEnvName = prevSelectedEnv;
+                } else if (appState.activeEnvironment && appState.environments[appState.activeEnvironment]) {
                     selectedEnvName = appState.activeEnvironment;
                 } else if (envNames.length > 0) {
                     selectedEnvName = envNames[0];
@@ -774,6 +783,10 @@ export const renderSettingsHtml = (token: string): string => {
                 }
 
                 renderAll();
+                if (detailsWasOpen) {
+                    const d = document.getElementById("individualToolsDetails");
+                    if (d) d.open = true;
+                }
                 markDirty(false);
                 if (selectedEnvName) {
                     void refreshDbStatus(selectedEnvName);
@@ -942,11 +955,33 @@ export const renderSettingsHtml = (token: string): string => {
             void refreshDbStatus(newName);
         }
 
-        function setAsActiveEnvironment(envName) {
+        async function setAsActiveEnvironment(envName) {
             appState.activeEnvironment = envName;
-            markDirty(true);
             renderEnvSidebar();
             renderEnvEditor();
+
+            try {
+                const res = await fetch("/api/active-environment?token=" + encodeURIComponent(SESSION_TOKEN), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ activeEnvironment: envName })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    if (data.configVersion) {
+                        lastConfigVersion = data.configVersion;
+                    }
+                    showBanner(
+                        "<strong>Active environment switched to '" + escapeHtml(envName) + "'!</strong> " +
+                        "state.json has been updated and your MCP client has been notified to refresh its tool list.",
+                        "success"
+                    );
+                } else {
+                    markDirty(true);
+                }
+            } catch {
+                markDirty(true);
+            }
         }
 
         function escapeHtml(str) {
@@ -1731,6 +1766,9 @@ export const renderSettingsHtml = (token: string): string => {
                     throw new Error(data.error || ("HTTP " + res.status));
                 }
 
+                if (data.configVersion) {
+                    lastConfigVersion = data.configVersion;
+                }
                 pendingRenames = [];
                 markDirty(false);
                 if (selectedEnvName) {
@@ -1758,6 +1796,71 @@ export const renderSettingsHtml = (token: string): string => {
         });
 
         let lastServerPid = null;
+        let eventSource = null;
+
+        function handleIncomingConfigUpdate(data) {
+            if (!data || !data.configVersion) return;
+            if (lastConfigVersion && data.configVersion === lastConfigVersion) {
+                return;
+            }
+            lastConfigVersion = data.configVersion;
+
+            if (!isDirty) {
+                void loadSettings(true);
+            } else if (data.activeEnvironment !== undefined && data.activeEnvironment !== appState.activeEnvironment) {
+                // If user has unsaved form changes, update the active environment indicator in-place without wiping their form edits
+                appState.activeEnvironment = data.activeEnvironment;
+                const detailsWasOpen = document.getElementById("individualToolsDetails")?.open;
+                renderEnvSidebar();
+                renderEnvEditor();
+                if (detailsWasOpen) {
+                    const d = document.getElementById("individualToolsDetails");
+                    if (d) d.open = true;
+                }
+            }
+        }
+
+        function connectServerEvents() {
+            if (eventSource) {
+                try {
+                    eventSource.close();
+                } catch {}
+            }
+            try {
+                eventSource = new EventSource("/api/events?token=" + encodeURIComponent(SESSION_TOKEN));
+                eventSource.onmessage = (evt) => {
+                    try {
+                        const data = JSON.parse(evt.data);
+                        const pill = document.getElementById("connPill");
+                        const text = document.getElementById("connPillText");
+                        if (pill && text) {
+                            pill.classList.remove("offline");
+                            text.textContent = "Connected";
+                        }
+                        if (data.pid) {
+                            if (lastServerPid !== null && data.pid !== lastServerPid && !isDirty) {
+                                lastServerPid = data.pid;
+                                void loadSettings(true);
+                                return;
+                            }
+                            lastServerPid = data.pid;
+                        }
+                        if (data.type === "config-changed" || data.type === "connected") {
+                            handleIncomingConfigUpdate(data);
+                        }
+                    } catch {}
+                };
+                eventSource.onerror = () => {
+                    const pill = document.getElementById("connPill");
+                    const text = document.getElementById("connPillText");
+                    if (pill && text) {
+                        pill.classList.add("offline");
+                        text.textContent = "Server Offline (waiting for MCP...)";
+                    }
+                };
+            } catch {}
+        }
+
         async function checkServerHeartbeat() {
             const pill = document.getElementById("connPill");
             const text = document.getElementById("connPillText");
@@ -1770,12 +1873,13 @@ export const renderSettingsHtml = (token: string): string => {
                     text.textContent = "Connected";
                 }
                 if (lastServerPid !== null && data.pid && data.pid !== lastServerPid && !isDirty) {
-                    // Server process restarted and no unsaved local edits exist; refresh schema/state
                     lastServerPid = data.pid;
-                    void loadSettings();
+                    void loadSettings(true);
+                    return;
                 } else if (data.pid) {
                     lastServerPid = data.pid;
                 }
+                handleIncomingConfigUpdate(data);
             } catch {
                 if (pill && text) {
                     pill.classList.add("offline");
@@ -1784,7 +1888,8 @@ export const renderSettingsHtml = (token: string): string => {
             }
         }
 
-        setInterval(checkServerHeartbeat, 20000);
+        connectServerEvents();
+        setInterval(checkServerHeartbeat, 10000);
         void checkServerHeartbeat();
 
         loadSettings();
