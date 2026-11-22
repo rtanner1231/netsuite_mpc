@@ -15,6 +15,8 @@ import { create } from "xmlbuilder2";
 type RecordUpdateCustomRecord = {
     scriptId: string;
     name?: string;
+    description?: string;
+    aiDescription?: string;
     includeNameField?: boolean;
     fields?: CustomRecordField[];
     saveToProject?: boolean;
@@ -23,7 +25,7 @@ type RecordUpdateCustomRecord = {
 export const updateCustomRecordTool: ToolDefinition = {
     name: "netsuite_update_custom_record",
     description:
-        "Updates and redeploys an existing Custom Record Type (customrecord_*) in NetSuite via an isolated temporary SDF project. Downloads the latest XML definition from NetSuite, modifies header properties (name, includeNameField) and/or appends new custom fields (custrecord_*), recalculates manifest.xml dependencies, deploys, and optionally copies the updated XML into the local project.",
+        "Updates and redeploys an existing Custom Record Type (customrecord_*) in NetSuite via an isolated temporary SDF project. Downloads the latest XML definition from NetSuite, modifies header properties (name, description, aiDescription, includeNameField) and/or appends new custom fields (custrecord_*), recalculates manifest.xml dependencies, deploys, and optionally copies the updated XML into the local project.",
     meta: {
         isDestructive: true,
         requiresSdf: true
@@ -39,6 +41,14 @@ export const updateCustomRecordTool: ToolDefinition = {
                 type: "string",
                 description: "(Optional) The updated name/label of the custom record."
             },
+            description: {
+                type: "string",
+                description: "(Optional) The updated description of the custom record."
+            },
+            aiDescription: {
+                type: "string",
+                description: "(Optional) The updated AI description (aidescription) of the custom record."
+            },
             includeNameField: {
                 type: "boolean",
                 description: "(Optional) Indicate if the native name field should be included."
@@ -53,9 +63,10 @@ export const updateCustomRecordTool: ToolDefinition = {
                         label: { type: "string", description: "The label displayed in the UI for this field." },
                         type: { type: "string", description: "Field type (e.g., 'TEXT', 'INTEGER', 'SELECT', 'DATE', 'CHECKBOX', 'CURRENCY')", enum: ["CHECKBOX", "CLOBTEXT", "CURRENCY", "DATE", "DATETIMETZ", "DOCUMENT", "EMAIL", "FLOAT", "HELP", "IMAGE", "INLINEHTML", "INTEGER", "MULTISELECT", "PASSWORD", "PERCENT", "PHONE", "RICHTEXT", "SELECT", "TEXT", "TEXTAREA", "TIMEOFDAY", "URL"] },
                         selectRecordType: { type: "string", description: "Required ONLY if type is SELECT or MULTISELECT. The scriptId of the record or list it references." },
-                        helpText: { type: "string", description: "Optional help text for the field." }
+                        description: { type: "string", description: "Description of the field." },
+                        helpText: { type: "string", description: "Help text displayed for the field in the UI." }
                     },
-                    required: ["scriptId", "label", "type"]
+                    required: ["scriptId", "label", "type", "description", "helpText"]
                 }
             },
             saveToProject: getSaveToProjectSchemaProperty()
@@ -64,7 +75,7 @@ export const updateCustomRecordTool: ToolDefinition = {
     },
     execute: async (args: RecordUpdateCustomRecord, server: Server) => {
         try {
-            const { scriptId, name, fields, includeNameField, saveToProject } = args;
+            const { scriptId, name, description, aiDescription, fields, includeNameField, saveToProject } = args;
             const projectRoot = await getProjectRoot(server);
             const projectConfig = await getProjectConfig(projectRoot);
 
@@ -96,6 +107,12 @@ export const updateCustomRecordTool: ToolDefinition = {
                     // 3. Modify properties
                     if (name !== undefined) {
                         obj.customrecordtype.recordname = name;
+                    }
+                    if (description !== undefined) {
+                        obj.customrecordtype.description = description;
+                    }
+                    if (aiDescription !== undefined) {
+                        obj.customrecordtype.aidescription = aiDescription;
                     }
                     if (includeNameField !== undefined) {
                         obj.customrecordtype.includename = includeNameField ? "T" : "F";

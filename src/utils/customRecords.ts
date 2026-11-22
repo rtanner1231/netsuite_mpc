@@ -7,7 +7,8 @@ export type CustomRecordField = {
     label: string;
     type: "CHECKBOX" | "CLOBTEXT" | "CURRENCY" | "DATE" | "DATETIMETZ" | "DOCUMENT" | "EMAIL" | "FLOAT" | "HELP" | "IMAGE" | "INLINEHTML" | "INTEGER" | "MULTISELECT" | "PASSWORD" | "PERCENT" | "PHONE" | "RICHTEXT" | "SELECT" | "TEXT" | "TEXTAREA" | "TIMEOFDAY" | "URL";
     selectRecordType?: string;
-    helpText?: string;
+    description: string;
+    helpText: string;
 }
 
 //if a standard record type is being used, we much use the Id
@@ -102,9 +103,10 @@ export const mapCustomRecordFields = async (fields: CustomRecordField[]) => {
             "@scriptid": field.scriptId,
             fieldtype: field.type,
             label: field.label,
+            description: field.description,
+            help: field.helpText,
         };
 
-        if (field.helpText) fieldObj.help = field.helpText;
         if (field.type === 'SELECT' && field.selectRecordType) {
             const selectRecordType = getSelectRecordType(field.selectRecordType);
             fieldObj.selectrecordtype = selectRecordType;
