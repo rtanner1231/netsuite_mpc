@@ -3,6 +3,7 @@ import { runSuiteQlTool } from "./runSuiteQl.js";
 import { getScriptLogsTool } from "./getScriptLogs.js";
 import { getRunFunctionLogsTool } from "./getRunFunctionLogs.js";
 import { uploadFileTool } from "./uploadFile.js";
+import { compareFilesTool } from "./compareFiles.js";
 import { runFunctionTool } from "./runFunction.js";
 import { loadRecordSampleTool } from "./loadRecordSample.js";
 import { createRecordTool } from "./createRecord.js";
@@ -26,6 +27,7 @@ export const toolsRegistry = [
     getScriptLogsTool,
     getRunFunctionLogsTool,
     uploadFileTool,
+    compareFilesTool,
     runFunctionTool,
     loadRecordSampleTool,
     createRecordTool,
