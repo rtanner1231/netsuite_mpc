@@ -1,6 +1,6 @@
 import { ToolDefinition } from "../types/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { generateAndDeploySdf } from "../utils/objects.js";
+import { generateAndDeploySdf, getSaveToProjectSchemaProperty } from "../utils/objects.js";
 import { applyDefaults } from "../defaults/index.js";
 import { ObjectDefaultType } from "../defaults/types.js";
 import { CustomRecordField, getManifestDependenciesFromFields, mapCustomRecordFields } from "../utils/customRecords.js";
@@ -10,12 +10,13 @@ type RecordCreateCustomRecord = {
     name: string;
     includeNameField: boolean;
     fields: CustomRecordField[];
-}
+    saveToProject?: boolean;
+};
 
 export const createCustomRecordTool: ToolDefinition = {
     name: "netsuite_create_custom_record",
     description:
-        "Creates and deploys a new Custom Record Type (customrecord_*) and its custom fields (custrecord_*) in NetSuite via SDF, applying configured defaults and resolving manifest.xml dependencies.",
+        "Creates and deploys a new Custom Record Type (customrecord_*) and its custom fields (custrecord_*) in NetSuite via an isolated temporary SDF project, applying configured defaults, resolving manifest.xml dependencies, and optionally copying the deployed XML into the local project.",
     meta: {
         isDestructive: true,
         requiresSdf: true
@@ -49,12 +50,13 @@ export const createCustomRecordTool: ToolDefinition = {
                     },
                     required: ["scriptId", "label", "type"]
                 }
-            }
+            },
+            saveToProject: getSaveToProjectSchemaProperty()
         },
         required: ["scriptId", "name", "fields", "includeNameField"]
     },
     execute: async (args: RecordCreateCustomRecord, server: Server) => {
-        const { scriptId, name, fields, includeNameField } = args;
+        const { scriptId, name, fields, includeNameField, saveToProject } = args;
 
         const mappedFields = fields ? await mapCustomRecordFields(fields) : [];
 
@@ -72,6 +74,13 @@ export const createCustomRecordTool: ToolDefinition = {
 
         const sdfData = await applyDefaults(baseRecordData, ObjectDefaultType.RECORD);
 
-        return await generateAndDeploySdf({ rootElement: "customrecordtype", scriptId, data: sdfData, server, manifestDependencies });
+        return await generateAndDeploySdf({
+            rootElement: "customrecordtype",
+            scriptId,
+            data: sdfData,
+            server,
+            manifestDependencies,
+            saveToProject
+        });
     }
 };

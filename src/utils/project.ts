@@ -7,6 +7,8 @@ import { APP_CONFIG_PATH } from "./config.js";
 
 const execAsync = util.promisify(exec);
 
+export type ObjectsFolderStrategy = "branch" | "flat" | "type";
+
 export interface ProjectConfig {
     /**
      * SDF project source folder relative to projectRoot (e.g., "dist", "src", ".").
@@ -38,6 +40,22 @@ export interface ProjectConfig {
      * Optional path to tsconfig.json (relative to projectRoot, defaults to "tsconfig.json").
      */
     tsconfigPath?: string;
+    /**
+     * Whether deployed SDF object XML files (and manifest.xml dependencies) should be copied
+     * into the local project after a successful temporary SDF project deployment.
+     * - "auto" (default): Copy if an SDF project structure (manifest.xml or Objects directory) exists locally
+     * - true: Always copy into the local project's SDF Objects directory
+     * - false: Never copy (deploy in the background only)
+     */
+    saveObjectsToProject?: boolean | "auto";
+    /**
+     * Subfolder organization strategy when saving new SDF object XML files to `<sdfSourceDir>/Objects/`.
+     * (Note: If an object XML file already exists anywhere under `Objects/`, it is always updated in-place.)
+     * - "branch" (default): `<sdfSourceDir>/Objects/<git_branch>/<scriptId>.xml`
+     * - "flat": `<sdfSourceDir>/Objects/<scriptId>.xml`
+     * - "type": `<sdfSourceDir>/Objects/<rootElement>/<scriptId>.xml`
+     */
+    objectsFolderStrategy?: ObjectsFolderStrategy;
 }
 
 export interface BuildOptions {
@@ -124,6 +142,23 @@ const extractProjectConfigSection = (raw: Record<string, any> | null): Partial<P
     if (typeof candidate.tsconfigPath === "string" && candidate.tsconfigPath.trim() !== "") {
         result.tsconfigPath = candidate.tsconfigPath.trim();
     }
+    if (
+        typeof candidate.saveObjectsToProject === "boolean" ||
+        candidate.saveObjectsToProject === "auto"
+    ) {
+        result.saveObjectsToProject = candidate.saveObjectsToProject;
+    } else if (candidate.saveObjectsToProject === "true") {
+        result.saveObjectsToProject = true;
+    } else if (candidate.saveObjectsToProject === "false") {
+        result.saveObjectsToProject = false;
+    }
+    if (
+        candidate.objectsFolderStrategy === "branch" ||
+        candidate.objectsFolderStrategy === "flat" ||
+        candidate.objectsFolderStrategy === "type"
+    ) {
+        result.objectsFolderStrategy = candidate.objectsFolderStrategy;
+    }
 
     return result;
 };
@@ -139,7 +174,9 @@ const extractProjectConfigSection = (raw: Record<string, any> | null): Partial<P
 export const getProjectConfig = async (projectRoot: string): Promise<ProjectConfig> => {
     const defaults: ProjectConfig = {
         buildBeforeUpload: "auto",
-        buildCommand: "npm run build"
+        buildCommand: "npm run build",
+        saveObjectsToProject: "auto",
+        objectsFolderStrategy: "branch"
     };
 
     const globalJson = await readJsonFileIfExists(APP_CONFIG_PATH);
@@ -219,6 +256,98 @@ export const getSdfSrcDir = async (projectRoot: string, config?: ProjectConfig):
     }
 
     return path.join(projectRoot, "dist");
+};
+
+/**
+ * Checks whether a local SDF project structure exists at the resolved SDF source directory
+ * (specifically whether `manifest.xml` or an `Objects` directory is present).
+ */
+export const hasLocalSdfObjectsStructure = async (
+    projectRoot: string,
+    config?: ProjectConfig
+): Promise<{ exists: boolean; sdfSrcDir: string; reason: string }> => {
+    const resolvedConfig = config ?? (await getProjectConfig(projectRoot));
+    const sdfSrcDir = await getSdfSrcDir(projectRoot, resolvedConfig);
+    const relSdfDir = path.relative(projectRoot, sdfSrcDir) || ".";
+
+    if (await fileExists(path.join(sdfSrcDir, "manifest.xml"))) {
+        return {
+            exists: true,
+            sdfSrcDir,
+            reason: `manifest.xml found in '${relSdfDir}'`
+        };
+    }
+
+    if (await fileExists(path.join(sdfSrcDir, "Objects"))) {
+        return {
+            exists: true,
+            sdfSrcDir,
+            reason: `Objects directory found in '${relSdfDir}'`
+        };
+    }
+
+    return {
+        exists: false,
+        sdfSrcDir,
+        reason: `no manifest.xml or Objects directory found in '${relSdfDir}'`
+    };
+};
+
+export interface EffectiveSaveToProjectInfo {
+    /** The raw configured mode ("auto", true, or false). */
+    configuredMode: boolean | "auto";
+    /** What the default resolves to right now (true or false). */
+    effectiveDefault: boolean;
+    /** Resolved SDF source directory. */
+    sdfSrcDir: string;
+    /** Resolved folder strategy for new objects ("branch", "flat", or "type"). */
+    objectsFolderStrategy: ObjectsFolderStrategy;
+    /** Human-readable explanation of why effectiveDefault is true or false. */
+    reason: string;
+}
+
+/**
+ * Resolves whether SDF objects should be saved to the local project by default
+ * (when a tool caller does not explicitly pass `saveToProject`).
+ */
+export const resolveEffectiveSaveToProject = async (
+    projectRoot: string,
+    config?: ProjectConfig
+): Promise<EffectiveSaveToProjectInfo> => {
+    const resolvedConfig = config ?? (await getProjectConfig(projectRoot));
+    const configuredMode = resolvedConfig.saveObjectsToProject ?? "auto";
+    const objectsFolderStrategy = resolvedConfig.objectsFolderStrategy ?? "branch";
+
+    if (configuredMode === true) {
+        const sdfSrcDir = await getSdfSrcDir(projectRoot, resolvedConfig);
+        return {
+            configuredMode: true,
+            effectiveDefault: true,
+            sdfSrcDir,
+            objectsFolderStrategy,
+            reason: "configured as true"
+        };
+    }
+
+    if (configuredMode === false) {
+        const sdfSrcDir = await getSdfSrcDir(projectRoot, resolvedConfig);
+        return {
+            configuredMode: false,
+            effectiveDefault: false,
+            sdfSrcDir,
+            objectsFolderStrategy,
+            reason: "configured as false"
+        };
+    }
+
+    const structure = await hasLocalSdfObjectsStructure(projectRoot, resolvedConfig);
+    return {
+        configuredMode: "auto",
+        effectiveDefault: structure.exists,
+        sdfSrcDir: structure.sdfSrcDir,
+        objectsFolderStrategy,
+        reason: `configured as 'auto' (${structure.reason})`
+    };
 };
 
 /**

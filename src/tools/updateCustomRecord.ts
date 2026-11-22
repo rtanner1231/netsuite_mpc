@@ -1,8 +1,14 @@
 import fs from "fs/promises";
 import { ToolDefinition } from "../types/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { deploySdfObject, downloadSdfObject } from "../utils/objects.js";
+import {
+    deployObjectFromTempProject,
+    downloadSdfObjectInTempProject,
+    getSaveToProjectSchemaProperty
+} from "../utils/objects.js";
 import { getProjectRoot } from "../utils/mcp.js";
+import { getProjectConfig } from "../utils/project.js";
+import { withTempSdfProject } from "../utils/tempSdfProject.js";
 import { CustomRecordField, mapCustomRecordFields } from "../utils/customRecords.js";
 import { create } from "xmlbuilder2";
 
@@ -11,12 +17,13 @@ type RecordUpdateCustomRecord = {
     name?: string;
     includeNameField?: boolean;
     fields?: CustomRecordField[];
-}
+    saveToProject?: boolean;
+};
 
 export const updateCustomRecordTool: ToolDefinition = {
     name: "netsuite_update_custom_record",
     description:
-        "Updates and redeploys an existing Custom Record Type (customrecord_*) in NetSuite via SDF. Downloads the latest XML definition from NetSuite, modifies header properties (name, includeNameField) and/or appends new custom fields (custrecord_*), recalculates manifest.xml dependencies, and deploys.",
+        "Updates and redeploys an existing Custom Record Type (customrecord_*) in NetSuite via an isolated temporary SDF project. Downloads the latest XML definition from NetSuite, modifies header properties (name, includeNameField) and/or appends new custom fields (custrecord_*), recalculates manifest.xml dependencies, deploys, and optionally copies the updated XML into the local project.",
     meta: {
         isDestructive: true,
         requiresSdf: true
@@ -50,83 +57,112 @@ export const updateCustomRecordTool: ToolDefinition = {
                     },
                     required: ["scriptId", "label", "type"]
                 }
-            }
+            },
+            saveToProject: getSaveToProjectSchemaProperty()
         },
         required: ["scriptId"]
     },
     execute: async (args: RecordUpdateCustomRecord, server: Server) => {
         try {
-            const { scriptId, name, fields, includeNameField } = args;
+            const { scriptId, name, fields, includeNameField, saveToProject } = args;
             const projectRoot = await getProjectRoot(server);
+            const projectConfig = await getProjectConfig(projectRoot);
 
-            // 1. Download the most up-to-date XML from the NetSuite account
-            const filePath = await downloadSdfObject(projectRoot, scriptId, "ALL"); // Use "ALL" or "customrecordtype"? CLI docs say type is ALL or specific. customrecordtype is typical. 
+            return await withTempSdfProject(
+                {
+                    projectRoot,
+                    projectConfig,
+                    tempDirPrefix: "netsuite-mcp-rec-update-"
+                },
+                async (tempProject) => {
+                    // 1. Download the most up-to-date XML from the NetSuite account into the temp project
+                    const filePath = await downloadSdfObjectInTempProject(tempProject, scriptId, "ALL");
 
-            // 2. Parse the downloaded file
-            const xmlContent = await fs.readFile(filePath, "utf-8");
-            const obj = create(xmlContent).toObject() as any;
+                    // 2. Parse the downloaded file
+                    const xmlContent = await fs.readFile(filePath, "utf-8");
+                    const obj = create(xmlContent).toObject() as any;
 
-            if (!obj.customrecordtype) {
-                return { content: [{ type: "text", text: `Error: Could not parse customrecordtype from the downloaded object.` }] };
-            }
+                    if (!obj.customrecordtype) {
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Error: Could not parse customrecordtype from the downloaded object.`
+                                }
+                            ]
+                        };
+                    }
 
-            // 3. Modify properties
-            if (name !== undefined) {
-                obj.customrecordtype.recordname = name;
-            }
-            if (includeNameField !== undefined) {
-                obj.customrecordtype.includename = includeNameField ? 'T' : 'F';
-            }
+                    // 3. Modify properties
+                    if (name !== undefined) {
+                        obj.customrecordtype.recordname = name;
+                    }
+                    if (includeNameField !== undefined) {
+                        obj.customrecordtype.includename = includeNameField ? "T" : "F";
+                    }
 
-            if (fields && fields.length > 0) {
-                const mappedFields = await mapCustomRecordFields(fields);
-                
-                if (!obj.customrecordtype.customrecordcustomfields) {
-                    obj.customrecordtype.customrecordcustomfields = {};
-                }
-                if (!obj.customrecordtype.customrecordcustomfields.customrecordcustomfield) {
-                    obj.customrecordtype.customrecordcustomfields.customrecordcustomfield = [];
-                }
+                    if (fields && fields.length > 0) {
+                        const mappedFields = await mapCustomRecordFields(fields);
 
-                let existingFields = obj.customrecordtype.customrecordcustomfields.customrecordcustomfield;
-                if (!Array.isArray(existingFields)) {
-                    existingFields = [existingFields];
-                }
-                
-                existingFields.push(...mappedFields);
-                obj.customrecordtype.customrecordcustomfields.customrecordcustomfield = existingFields;
-            }
+                        if (!obj.customrecordtype.customrecordcustomfields) {
+                            obj.customrecordtype.customrecordcustomfields = {};
+                        }
+                        if (!obj.customrecordtype.customrecordcustomfields.customrecordcustomfield) {
+                            obj.customrecordtype.customrecordcustomfields.customrecordcustomfield = [];
+                        }
 
-            // 4. Calculate manifest dependencies
-            const manifestDependencies: { objects: string[] } = { objects: [] };
-            if (obj.customrecordtype.customrecordcustomfields?.customrecordcustomfield) {
-                let allFields = obj.customrecordtype.customrecordcustomfields.customrecordcustomfield;
-                if (!Array.isArray(allFields)) {
-                    allFields = [allFields];
-                }
-                
-                const deps = new Set<string>();
-                for (const f of allFields) {
-                    const selType = f.selectrecordtype;
-                    if (typeof selType === 'string') {
-                        if (selType.startsWith('[scriptid=customrecord')) {
-                            const match = selType.match(/\[scriptid=(.*?)\]/);
-                            if (match) deps.add(match[1]);
-                        } else if (selType.startsWith('customrecord')) {
-                            deps.add(selType);
+                        let existingFields = obj.customrecordtype.customrecordcustomfields.customrecordcustomfield;
+                        if (!Array.isArray(existingFields)) {
+                            existingFields = [existingFields];
+                        }
+
+                        existingFields.push(...mappedFields);
+                        obj.customrecordtype.customrecordcustomfields.customrecordcustomfield = existingFields;
+                    }
+
+                    // 4. Calculate manifest dependencies
+                    const manifestDependencies: { objects: string[] } = { objects: [] };
+                    if (obj.customrecordtype.customrecordcustomfields?.customrecordcustomfield) {
+                        let allFields = obj.customrecordtype.customrecordcustomfields.customrecordcustomfield;
+                        if (!Array.isArray(allFields)) {
+                            allFields = [allFields];
+                        }
+
+                        const deps = new Set<string>();
+                        for (const f of allFields) {
+                            const selType = f.selectrecordtype;
+                            if (typeof selType === "string") {
+                                if (selType.startsWith("[scriptid=customrecord")) {
+                                    const match = selType.match(/\[scriptid=(.*?)\]/);
+                                    if (match) deps.add(match[1]);
+                                } else if (selType.startsWith("customrecord")) {
+                                    deps.add(selType);
+                                }
+                            }
+                        }
+                        if (deps.size > 0) {
+                            manifestDependencies.objects = Array.from(deps);
                         }
                     }
-                }
-                if (deps.size > 0) {
-                    manifestDependencies.objects = Array.from(deps);
-                }
-            }
 
-            // 5. Convert back to XML and deploy
-            const updatedXml = create({ version: "1.0", encoding: "UTF-8" }, obj).end({ prettyPrint: true });
-            const output = await deploySdfObject(projectRoot, scriptId, updatedXml, manifestDependencies.objects.length > 0 ? manifestDependencies : undefined);
+                    // 5. Convert back to XML, deploy inside tempProject, and optionally sync to the local project
+                    const updatedXml = create({ version: "1.0", encoding: "UTF-8" }, obj).end({ prettyPrint: true });
+                    const output = await deployObjectFromTempProject({
+                        tempProject,
+                        projectRoot,
+                        scriptId,
+                        xmlContent: updatedXml,
+                        manifestDependencies: manifestDependencies.objects.length > 0 ? manifestDependencies : undefined,
+                        options: {
+                            saveToProject,
+                            rootElement: "customrecordtype",
+                            projectConfig
+                        }
+                    });
 
-            return { content: [{ type: "text", text: output }] };
+                    return { content: [{ type: "text", text: output }] };
+                }
+            );
         } catch (error: any) {
             return { content: [{ type: "text", text: `Unexpected Tool Error: ${error.message}` }] };
         }

@@ -136,6 +136,30 @@ export const PROJECT_CONFIG_FIELDS: FieldSchema[] = [
         placeholder: "tsconfig.json",
         defaultValue: "tsconfig.json",
         helpText: "Relative path to tsconfig.json from the project root."
+    },
+    {
+        key: "saveObjectsToProject",
+        label: "Save Deployed SDF Objects to Project",
+        type: "select",
+        defaultValue: "auto",
+        options: [
+            { value: "auto", label: "Auto (copy if manifest.xml or Objects/ exists in project)" },
+            { value: "true", label: "Always (true)" },
+            { value: "false", label: "Never — background deploy only (false)" }
+        ],
+        helpText: "Controls whether SDF object XML files (and manifest.xml dependencies) are copied into the local project after deploying via the temporary SDF project. Can be overridden per tool call via saveToProject."
+    },
+    {
+        key: "objectsFolderStrategy",
+        label: "SDF Objects Subfolder Strategy",
+        type: "select",
+        defaultValue: "branch",
+        options: [
+            { value: "branch", label: "Git Branch (Objects/<branch>/<scriptId>.xml)" },
+            { value: "flat", label: "Flat (Objects/<scriptId>.xml)" },
+            { value: "type", label: "Object Type (Objects/<type>/<scriptId>.xml)" }
+        ],
+        helpText: "Determines where new SDF object XML files are saved under Objects/ when copied to the local project. Existing object files are always updated in-place."
     }
 ];
 

@@ -39,12 +39,13 @@ The server exposes the following MCP tools to interact directly with NetSuite, o
 - **`netsuite_get_script_logs`**: Fetch up to the last 500 execution logs (`scriptnote`) for a specific deployed NetSuite script by its file name (`scriptFileName`). *(Note: For logs generated via `netsuite_run_function`, use `netsuite_get_run_function_logs` instead.)*
 
 ### 5. SDF Updates & File Deployment
-*(Requires SuiteCloud CLI, `sdfId` configured in `env.json`, and an SDF project with `project.json`; all tools in this section are marked Destructive)*
+*(Requires SuiteCloud CLI and `sdfId` configured in `env.json`; executions run inside an isolated temporary SDF project so your repository's `project.json` and `deploy.xml` are never mutated)*
 
-- **`netsuite_upload_file`**: Upload an array of script files directly to the NetSuite File Cabinet using the SuiteCloud CLI (`suitecloud file:upload`). Conditionally runs the project build command (auto-detected or configured via `buildBeforeUpload` / `buildCommand`), resolves TypeScript (`.ts`) paths to compiled JavaScript (`.js`) File Cabinet paths via `tsconfig.json` (supporting both separate `rootDir`/`outDir` and intermingled in-place layouts) or explicit configuration, and temporarily aligns `defaultAuthId` in `project.json` with the active environment's `sdfId`.
-- **`netsuite_create_custom_record`**: Create and deploy a new Custom Record Type (`customrecord_*`) and its custom fields (`custrecord_*`) to NetSuite via SDF. Supports field types, `SELECT`/`MULTISELECT` record references, automatic `manifest.xml` dependency resolution, and default record/field properties from `config.json`.
-- **`netsuite_update_custom_record`**: Update and redeploy an existing Custom Record Type (`customrecord_*`) via SDF. Downloads the latest XML definition from NetSuite, updates header properties (`name`, `includeNameField`) and/or appends new custom fields (`custrecord_*`), recalculates `manifest.xml` dependencies, and deploys the updated object.
-- **`netsuite_create_custom_list`**: Create and deploy a new Custom List (`customlist_*`) and its list values to NetSuite via SDF, applying any default list properties configured in `config.json`.
+- **`netsuite_upload_file`** *(Destructive)*: Upload an array of script files directly to the NetSuite File Cabinet using the SuiteCloud CLI (`suitecloud file:upload`) inside an isolated temporary SDF project. Conditionally runs the project build command (auto-detected or configured via `buildBeforeUpload` / `buildCommand`), resolves TypeScript (`.ts`) paths to compiled JavaScript (`.js`) File Cabinet paths via `tsconfig.json` (supporting both separate `rootDir`/`outDir` and intermingled in-place layouts) or explicit configuration, stages the compiled files in the temporary SDF project configured with the active environment's `sdfId`, and uploads them without modifying the workspace's `project.json`.
+- **`netsuite_compare_files`**: Compare local files against the versions currently deployed in the NetSuite File Cabinet and return an array of unified diffs. Conditionally builds the project first, resolves `.ts` or `.js` paths to their NetSuite File Cabinet paths, imports the remote files into an isolated temporary SDF project via `suitecloud file:import`, and computes the diff for each file.
+- **`netsuite_create_custom_record`** *(Destructive)*: Create and deploy a new Custom Record Type (`customrecord_*`) and its custom fields (`custrecord_*`) to NetSuite via an isolated temporary SDF project. Supports field types, `SELECT`/`MULTISELECT` record references, automatic `manifest.xml` dependency resolution, and default record/field properties from `config.json`. Includes an optional `saveToProject` parameter (whose description dynamically reports the current effective default) to control whether the deployed XML file and `manifest.xml` dependencies are copied into your local project after deployment succeeds.
+- **`netsuite_update_custom_record`** *(Destructive)*: Update and redeploy an existing Custom Record Type (`customrecord_*`) via an isolated temporary SDF project. Downloads the latest XML definition from NetSuite into the temporary project, updates header properties (`name`, `includeNameField`) and/or appends new custom fields (`custrecord_*`), recalculates `manifest.xml` dependencies, deploys the updated object, and optionally copies the updated XML into your local project (`saveToProject`).
+- **`netsuite_create_custom_list`** *(Destructive)*: Create and deploy a new Custom List (`customlist_*`) and its list values to NetSuite via an isolated temporary SDF project, applying any default list properties configured in `config.json` and optionally copying the deployed XML into your local project (`saveToProject`).
 
 ## Installation
 
@@ -204,7 +205,9 @@ You can optionally create a `config.json` file in the configuration directory to
     "buildCommand": "npm run build",
     "tsRootDir": "TypeScripts",
     "jsOutDir": "dist/FileCabinet/SuiteScripts",
-    "tsconfigPath": "tsconfig.json"
+    "tsconfigPath": "tsconfig.json",
+    "saveObjectsToProject": "auto",
+    "objectsFolderStrategy": "branch"
   }
 }
 ```
@@ -213,6 +216,13 @@ You can optionally create a `config.json` file in the configuration directory to
 - **`buildBeforeUpload`**: `"auto"` (default, runs the build only when a build script/command exists and TypeScript is used), `true` (always build), or `false` (never build).
 - **`buildCommand`**: Command to run when building (defaults to `"npm run build"`).
 - **`tsRootDir` / `jsOutDir`**: Optional explicit TypeScript source and JavaScript output directory overrides (if omitted, automatically resolved from `tsconfig.json`).
+- **`tsconfigPath`**: Relative path to `tsconfig.json` from the project root (defaults to `"tsconfig.json"`).
+- **`saveObjectsToProject`**: Controls whether SDF object XML files (and `manifest.xml` dependencies) deployed via the temporary SDF project are copied into your local project after deployment succeeds.
+  - `"auto"` (default): Copies deployed XML files into `<sdfSourceDir>/Objects/...` if `manifest.xml` or an `Objects` folder exists in your local project; otherwise runs as a background-only deployment.
+  - `true`: Always copies deployed XML files into the local project.
+  - `false`: Never copies files to the local project (background-only deployment).
+  - *(Can be overridden on any individual tool call via the `saveToProject` boolean parameter, whose tool schema description dynamically displays the current effective default.)*
+- **`objectsFolderStrategy`**: Controls where **new** SDF object XML files are placed under `<sdfSourceDir>/Objects/` when copied to the local project (`"branch"` [default] -> `Objects/<git_branch>/<scriptId>.xml`, `"flat"` -> `Objects/<scriptId>.xml`, or `"type"` -> `Objects/<rootElement>/<scriptId>.xml`). If `<scriptId>.xml` already exists anywhere under `Objects/`, it is always updated in-place to avoid duplicate object definitions.
 
 ## Generating the SQLite Schema Database (`netsuitescripts/MCPSchemaLoad.html`)
 

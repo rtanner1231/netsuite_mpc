@@ -1634,7 +1634,7 @@ export const renderSettingsHtml = (token: string): string => {
 
             let normalizedValue = rawValue;
 
-            if (sec.id === "project" && fieldKey === "buildBeforeUpload") {
+            if (sec.id === "project" && (fieldKey === "buildBeforeUpload" || fieldKey === "saveObjectsToProject")) {
                 if (rawValue === "true") normalizedValue = true;
                 else if (rawValue === "false") normalizedValue = false;
                 else normalizedValue = "auto";

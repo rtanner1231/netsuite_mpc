@@ -1,6 +1,6 @@
 import { ToolDefinition } from "../types/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { generateAndDeploySdf } from "../utils/objects.js";
+import { generateAndDeploySdf, getSaveToProjectSchemaProperty } from "../utils/objects.js";
 import { applyDefaults } from "../defaults/index.js";
 import { ObjectDefaultType } from "../defaults/types.js";
 
@@ -13,12 +13,13 @@ type ListCreateCustomList = {
     scriptId: string;
     name: string;
     values: ListCreateValue[];
+    saveToProject?: boolean;
 };
 
 export const createCustomListTool: ToolDefinition = {
     name: "netsuite_create_custom_list",
     description:
-        "Creates and deploys a new Custom List (customlist_*) and its list values in NetSuite via SDF, applying any configured list defaults.",
+        "Creates and deploys a new Custom List (customlist_*) and its list values in NetSuite via an isolated temporary SDF project, applying any configured list defaults and optionally copying the deployed XML into the local project.",
     meta: {
         isDestructive: true,
         requiresSdf: true
@@ -51,12 +52,13 @@ export const createCustomListTool: ToolDefinition = {
                     },
                     required: ["scriptId", "value"]
                 }
-            }
+            },
+            saveToProject: getSaveToProjectSchemaProperty()
         },
         required: ["scriptId", "name", "values"]
     },
     execute: async (args: ListCreateCustomList, server: Server) => {
-        const { scriptId, name, values } = args;
+        const { scriptId, name, values, saveToProject } = args;
 
         const mappedValues = values ? values.map((val) => {
             return {
@@ -80,7 +82,8 @@ export const createCustomListTool: ToolDefinition = {
             rootElement: "customlist",
             scriptId,
             data: sdfData,
-            server
+            server,
+            saveToProject
         });
     }
 };

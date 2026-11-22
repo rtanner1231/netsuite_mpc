@@ -141,6 +141,21 @@ export const restoreDeployXml = async (srcPath: string, originalContent: string 
     }
 };
 
+/**
+ * Executes `suitecloud project:deploy` inside the specified SDF project directory.
+ */
+export const runSdfDeployInDir = async (
+    projectDir: string
+): Promise<{ success: boolean; output: string }> => {
+    try {
+        const { stdout } = await execAsync(`suitecloud project:deploy`, { cwd: projectDir });
+        return { success: true, output: `Success!\nOutput:\n${stdout}` };
+    } catch (execError: any) {
+        const errorOutput = execError.stdout || execError.stderr || execError.message;
+        return { success: false, output: `Deployment Validation/Execution Failed:\n${errorOutput}` };
+    }
+};
+
 export const runDeploymentPipeline = async (
     projectRoot: string,
     deployConfig: DeployConfig,
