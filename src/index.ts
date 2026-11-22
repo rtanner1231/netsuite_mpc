@@ -1,6 +1,12 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+    CallToolRequestSchema,
+    GetPromptRequestSchema,
+    ListPromptsRequestSchema,
+    ListToolsRequestSchema
+} from "@modelcontextprotocol/sdk/types.js";
+import { promptsRegistry } from "./prompts/index.js";
 import { toolsRegistry } from "./tools/index.js";
 import { EnvironmentConfig, getEnvironmentConfig, getToolDisableReason } from "./utils/config.js";
 import { getProjectRoot } from "./utils/mcp.js";
@@ -9,8 +15,30 @@ import { getSaveToProjectSchemaProperty } from "./utils/objects.js";
 
 const server = new Server(
     { name: "NetSuite Schema Provider TS", version: "1.0.0" },
-    { capabilities: { tools: { listChanged: true } } }
+    { capabilities: { tools: { listChanged: true }, prompts: {} } }
 );
+
+// Register prompts to MCP
+server.setRequestHandler(ListPromptsRequestSchema, async () => {
+    return {
+        prompts: promptsRegistry.map(prompt => ({
+            name: prompt.name,
+            title: prompt.title,
+            description: prompt.description,
+            arguments: prompt.arguments
+        }))
+    };
+});
+
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    const requestedPrompt = promptsRegistry.find(p => p.name === request.params.name);
+
+    if (!requestedPrompt) {
+        throw new Error(`Prompt not found: ${request.params.name}`);
+    }
+
+    return await requestedPrompt.getMessages(request.params.arguments);
+});
 
 // Register tools to MCP
 server.setRequestHandler(ListToolsRequestSchema, async () => {

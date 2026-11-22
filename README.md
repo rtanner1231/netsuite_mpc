@@ -11,9 +11,9 @@ The server exposes the following MCP tools to interact directly with NetSuite, o
 ### 1. Environment & Settings Management
 *(Always available, even before `env.json` or `state.json` is initialized)*
 
-- **`netsuite_open_settings`**: Launch a local graphical web interface in your browser to add, edit, or delete NetSuite environments, test OAuth/RESTlet connections, upload SQLite schema databases (`.db`) and trigger LanceDB vector database (`.lance`) rebuilds with live progress, configure per-environment tool permissions (`disableDestructive`, `disableSdf`, and individual tool toggles), and customize global `config.json` defaults. Automatically creates the configuration directory and files on first save.
-- **`netsuite_list_environments`**: List all configured NetSuite environments from `env.json` and indicate which environment is currently active.
-- **`netsuite_switch_environment`**: Switch the active NetSuite environment by updating (or initializing) `state.json`, re-evaluating environment-specific tool restrictions (`disableDestructive`, `disableSdf`, `disabledTools`), and notifying the MCP client that available tools may have changed.
+- **`netsuite_open_settings`** *(Prompt: `open-settings` — "Open NetSuite Settings")*: Launch a local graphical web interface in your browser to add, edit, or delete NetSuite environments, test OAuth/RESTlet connections, upload SQLite schema databases (`.db`) and trigger LanceDB vector database (`.lance`) rebuilds with live progress, configure per-environment tool permissions (`disableDestructive`, `disableSdf`, and individual tool toggles), and customize global `config.json` defaults. Automatically creates the configuration directory and files on first save.
+- **`netsuite_list_environments`** *(Prompt: `list-environments` — "List NetSuite Environments")*: List all configured NetSuite environments from `env.json` and indicate which environment is currently active.
+- **`netsuite_switch_environment`** *(Prompt: `switch-environment` — "Switch NetSuite Environment", optional `environment` argument)*: Switch the active NetSuite environment by updating (or initializing) `state.json`, re-evaluating environment-specific tool restrictions (`disableDestructive`, `disableSdf`, `disabledTools`), and notifying the MCP client that available tools may have changed.
 
 ### 2. Table & Schema Discovery
 *(Powered by the local SQLite `.db` schema database and LanceDB `.lance` vector store, with NetSuite REST Metadata API fallback)*
