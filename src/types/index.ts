@@ -6,6 +6,16 @@ export interface ToolMetadata {
     alwaysAvailable?: boolean;
 }
 
+export type ToolContentItem =
+    | { type: "text"; text: string }
+    | { type: "image"; data: string; mimeType: string }
+    | {
+          type: "resource";
+          resource:
+              | { uri: string; mimeType?: string; text: string }
+              | { uri: string; mimeType?: string; blob: string };
+      };
+
 export interface ToolDefinition {
     name: string;
     description: string;
@@ -15,7 +25,7 @@ export interface ToolDefinition {
         properties: Record<string, any>;
         required?: string[];
     };
-    execute: (args: any, server: Server) => Promise<{ content: { type: "text"; text: string }[] }>;
+    execute: (args: any, server: Server) => Promise<{ content: ToolContentItem[]; isError?: boolean }>;
 }
 
 export interface PromptArgumentDefinition {

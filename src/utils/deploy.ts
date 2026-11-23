@@ -16,6 +16,8 @@ export interface DeployConfig {
 
 export interface ManifestDependencies {
     objects?: string[];
+    features?: string[];
+    files?: string[];
 }
 
 /**
@@ -73,10 +75,13 @@ export const writeTemporaryDeployXml = async (projectRoot: string, config: Deplo
 };
 
 /**
- * Reads, updates, and overwrites manifest.xml to ensure the requested dependency objects are present.
+ * Reads, updates, and overwrites manifest.xml to ensure the requested dependency objects, features, and files are present.
  */
 export const updateManifestXml = async (projectRoot: string, dependencies: ManifestDependencies): Promise<void> => {
-    if (!dependencies.objects || dependencies.objects.length === 0) return;
+    const hasObjects = Boolean(dependencies.objects && dependencies.objects.length > 0);
+    const hasFeatures = Boolean(dependencies.features && dependencies.features.length > 0);
+    const hasFiles = Boolean(dependencies.files && dependencies.files.length > 0);
+    if (!hasObjects && !hasFeatures && !hasFiles) return;
 
     const manifestPath = path.join(projectRoot, "manifest.xml");
     let xmlContent = "";
@@ -100,32 +105,108 @@ export const updateManifestXml = async (projectRoot: string, dependencies: Manif
     if (!obj.manifest.dependencies) {
         obj.manifest.dependencies = {};
     }
-    if (!obj.manifest.dependencies.objects) {
-        obj.manifest.dependencies.objects = {};
-    }
-
-    let currentObjects = obj.manifest.dependencies.objects.object;
-
-    // Normalize to array since xmlbuilder2 maps a single node to an object and multiple to an array
-    if (currentObjects === undefined) {
-        currentObjects = [];
-    } else if (!Array.isArray(currentObjects)) {
-        currentObjects = [currentObjects];
-    }
 
     let isModified = false;
 
-    // Append new objects if they don't already exist
-    for (const newObj of dependencies.objects) {
-        if (!currentObjects.includes(newObj)) {
-            currentObjects.push(newObj);
-            isModified = true;
+    if (hasFeatures && dependencies.features) {
+        if (!obj.manifest.dependencies.features) {
+            obj.manifest.dependencies.features = {};
         }
+
+        let currentFeatures = obj.manifest.dependencies.features.feature;
+        if (currentFeatures === undefined) {
+            currentFeatures = [];
+        } else if (!Array.isArray(currentFeatures)) {
+            currentFeatures = [currentFeatures];
+        }
+
+        for (const newFeature of dependencies.features) {
+            const existingIndex = currentFeatures.findIndex((item: any) => {
+                if (typeof item === "string") {
+                    return item.toUpperCase() === newFeature.toUpperCase();
+                }
+                if (item && typeof item === "object" && typeof item["#"] === "string") {
+                    return item["#"].toUpperCase() === newFeature.toUpperCase();
+                }
+                return false;
+            });
+
+            if (existingIndex === -1) {
+                currentFeatures.push({
+                    "@required": "true",
+                    "#": newFeature
+                });
+                isModified = true;
+            } else {
+                const existingItem = currentFeatures[existingIndex];
+                if (typeof existingItem === "string") {
+                    currentFeatures[existingIndex] = {
+                        "@required": "true",
+                        "#": existingItem
+                    };
+                    isModified = true;
+                } else if (
+                    existingItem &&
+                    typeof existingItem === "object" &&
+                    existingItem["@required"] !== "true"
+                ) {
+                    existingItem["@required"] = "true";
+                    isModified = true;
+                }
+            }
+        }
+
+        obj.manifest.dependencies.features.feature = currentFeatures;
+    }
+
+    if (hasObjects && dependencies.objects) {
+        if (!obj.manifest.dependencies.objects) {
+            obj.manifest.dependencies.objects = {};
+        }
+
+        let currentObjects = obj.manifest.dependencies.objects.object;
+
+        // Normalize to array since xmlbuilder2 maps a single node to an object and multiple to an array
+        if (currentObjects === undefined) {
+            currentObjects = [];
+        } else if (!Array.isArray(currentObjects)) {
+            currentObjects = [currentObjects];
+        }
+
+        // Append new objects if they don't already exist
+        for (const newObj of dependencies.objects) {
+            if (!currentObjects.includes(newObj)) {
+                currentObjects.push(newObj);
+                isModified = true;
+            }
+        }
+
+        obj.manifest.dependencies.objects.object = currentObjects;
+    }
+
+    if (hasFiles && dependencies.files) {
+        if (!obj.manifest.dependencies.files) {
+            obj.manifest.dependencies.files = {};
+        }
+
+        let currentFiles = obj.manifest.dependencies.files.file;
+        if (currentFiles === undefined) {
+            currentFiles = [];
+        } else if (!Array.isArray(currentFiles)) {
+            currentFiles = [currentFiles];
+        }
+
+        for (const newFile of dependencies.files) {
+            if (!currentFiles.includes(newFile)) {
+                currentFiles.push(newFile);
+                isModified = true;
+            }
+        }
+
+        obj.manifest.dependencies.files.file = currentFiles;
     }
 
     if (isModified) {
-        obj.manifest.dependencies.objects.object = currentObjects;
-
         // Convert the updated object back to formatted XML string, preserving the declaration
         const updatedXml = create({ version: "1.0", encoding: "UTF-8" }, obj).end({ prettyPrint: true });
         await fs.writeFile(manifestPath, updatedXml, "utf-8");

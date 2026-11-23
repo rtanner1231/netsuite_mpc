@@ -196,7 +196,11 @@ export const syncSdfObjectToMainProject = async (args: {
     await fs.writeFile(targetPath, xmlContent, "utf-8");
 
     let manifestUpdated = false;
-    if (manifestDependencies?.objects && manifestDependencies.objects.length > 0) {
+    const hasDependencies =
+        Boolean(manifestDependencies?.objects && manifestDependencies.objects.length > 0) ||
+        Boolean(manifestDependencies?.features && manifestDependencies.features.length > 0) ||
+        Boolean(manifestDependencies?.files && manifestDependencies.files.length > 0);
+    if (manifestDependencies && hasDependencies) {
         const mainManifestPath = path.join(sdfSrcDir, "manifest.xml");
         if (await fileExists(mainManifestPath)) {
             await updateManifestXml(sdfSrcDir, manifestDependencies);

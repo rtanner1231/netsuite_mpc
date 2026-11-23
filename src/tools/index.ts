@@ -24,6 +24,13 @@ import { listTranslationCollectionsTool } from "./listTranslationCollections.js"
 import { viewTranslationCollectionTool } from "./viewTranslationCollection.js";
 import { createTranslationCollectionTool } from "./createTranslationCollection.js";
 import { updateTranslationCollectionTool } from "./updateTranslationCollection.js";
+import { listTemplatesTool } from "./listTemplates.js";
+import { readAdvancedPdfTemplateTool } from "./readAdvancedPdfTemplate.js";
+import { upsertAdvancedPdfTemplateTool } from "./upsertAdvancedPdfTemplate.js";
+import { readEmailTemplateTool } from "./readEmailTemplate.js";
+import { upsertEmailTemplateTool } from "./upsertEmailTemplate.js";
+import { renderAdvancedPdfTemplateTool } from "./renderAdvancedPdfTemplate.js";
+import { renderEmailTemplateTool } from "./renderEmailTemplate.js";
 
 export const toolsRegistry = [
     listEnvironmentsTool,
@@ -46,6 +53,13 @@ export const toolsRegistry = [
     viewTranslationCollectionTool,
     createTranslationCollectionTool,
     updateTranslationCollectionTool,
+    listTemplatesTool,
+    readAdvancedPdfTemplateTool,
+    upsertAdvancedPdfTemplateTool,
+    readEmailTemplateTool,
+    upsertEmailTemplateTool,
+    renderAdvancedPdfTemplateTool,
+    renderEmailTemplateTool,
     rebuildVectorDatabaseTool,
     rebuildVectorDatabaseStatusTool,
     searchTablesTool,

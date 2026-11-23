@@ -7,11 +7,12 @@
  * Provides endpoints for executing SuiteQL queries, retrieving script execution logs,
  * dynamically running SuiteScript functions, and inspecting record samples.
  */
-define(["N/config", "N/log", "N/query", "N/record", "N/runtime", "N/search", "N/translation"], (
+define(["N/config", "N/log", "N/query", "N/record", "N/render", "N/runtime", "N/search", "N/translation"], (
   config,
   log,
   query,
   record,
+  render,
   runtime,
   search,
   translation,
@@ -28,6 +29,8 @@ define(["N/config", "N/log", "N/query", "N/record", "N/runtime", "N/search", "N/
     CREATE_RECORD: "CREATE_RECORD",
     GET_SUPPORTED_LOCALES: "GET_SUPPORTED_LOCALES",
     GET_TRANSLATIONS: "GET_TRANSLATIONS",
+    RENDER_PDF_TEMPLATE: "RENDER_PDF_TEMPLATE",
+    RENDER_EMAIL_TEMPLATE: "RENDER_EMAIL_TEMPLATE",
   };
 
   // =========================================================================
@@ -1252,6 +1255,353 @@ define(["N/config", "N/log", "N/query", "N/record", "N/runtime", "N/search", "N/
     }
   }
 
+  /**
+   * Resolves a record ID for a given recordType: uses requestedId if provided,
+   * otherwise searches for the most recently created record of that type.
+   *
+   * @param {string} recordType
+   * @param {string|number|null} [requestedId]
+   * @returns {{ resolvedId: number, isAutoSampled: boolean }}
+   */
+  function resolveOrAutoSampleRecordId(recordType, requestedId) {
+    if (requestedId != null && String(requestedId).trim() !== "") {
+      const numId = Number(String(requestedId).trim());
+      if (isNaN(numId) || numId <= 0) {
+        throw new Error(`Invalid record ID "${requestedId}" for recordType "${recordType}": must be a positive numeric internal ID.`);
+      }
+      return {
+        resolvedId: numId,
+        isAutoSampled: false,
+      };
+    }
+
+    const latestRecordSearch = search.create({
+      type: recordType,
+      filters: [],
+      columns: [
+        search.createColumn({
+          name: "internalid",
+          sort: search.Sort.DESC,
+        }),
+      ],
+    });
+
+    const searchResult = latestRecordSearch.run().getRange({ start: 0, end: 1 });
+    if (!searchResult || searchResult.length === 0) {
+      throw new Error(`No existing records found for type "${recordType}" to use as a sample.`);
+    }
+
+    return {
+      resolvedId: Number(searchResult[0].id),
+      isAutoSampled: true,
+    };
+  }
+
+  /**
+   * ACTION: RENDER_PDF_TEMPLATE
+   * Uses N/render to render an Advanced PDF/HTML Template (by scriptId or inline pdfContent)
+   * against a record (explicit or auto-sampled), saved search, and/or custom data sources,
+   * returning the base64-encoded PDF binary and optional evaluated BFO XML string.
+   *
+   * @param {Object} request
+   * @param {string} [request.scriptId]
+   * @param {string} [request.pdfContent]
+   * @param {string} [request.recordType]
+   * @param {string|number} [request.recordId]
+   * @param {string} [request.searchId]
+   * @param {Object} [request.customData]
+   * @param {boolean} [request.returnEvaluatedXml]
+   * @returns {Object}
+   */
+  function handleRenderPdfTemplate(request) {
+    const rawScriptId =
+      typeof request.scriptId === "string" ? request.scriptId.trim() : "";
+    const rawPdfContent =
+      typeof request.pdfContent === "string" ? request.pdfContent.trim() : "";
+
+    if (!rawScriptId && !rawPdfContent) {
+      return makeErrorResponse('Either "scriptId" or "pdfContent" is required to render an Advanced PDF Template.');
+    }
+
+    try {
+      const script = runtime.getCurrentScript();
+      const startGovernance = script.getRemainingUsage();
+      const timer = new ExecutionTimer();
+
+      const renderer = render.create();
+
+      // 1. Set template source: inline pdfContent (if provided) or deployed scriptId
+      if (rawPdfContent) {
+        renderer.templateContent = request.pdfContent;
+      } else {
+        renderer.setTemplateByScriptId({
+          scriptId: rawScriptId.toUpperCase(),
+        });
+      }
+
+      // 2. Bind record if recordType is specified
+      let resolvedRecordId = null;
+      let isAutoSampled = false;
+      const recordType =
+        typeof request.recordType === "string" && request.recordType.trim()
+          ? request.recordType.trim()
+          : null;
+
+      if (recordType) {
+        const sampleInfo = resolveOrAutoSampleRecordId(recordType, request.recordId);
+        resolvedRecordId = sampleInfo.resolvedId;
+        isAutoSampled = sampleInfo.isAutoSampled;
+
+        const recordObj = record.load({
+          type: recordType,
+          id: resolvedRecordId,
+          isDynamic: false,
+        });
+
+        renderer.addRecord({
+          templateName: "record",
+          record: recordObj,
+        });
+      }
+
+      // 3. Bind saved search results if searchId is specified
+      const searchId =
+        typeof request.searchId === "string" && request.searchId.trim()
+          ? request.searchId.trim()
+          : null;
+
+      if (searchId) {
+        const searchObj = search.load({ id: searchId });
+        renderer.addSearchResults({
+          templateName: "results",
+          searchResult: searchObj.run(),
+        });
+      }
+
+      // 4. Bind any custom data sources (customData: { [alias]: object })
+      if (
+        request.customData &&
+        typeof request.customData === "object" &&
+        !Array.isArray(request.customData)
+      ) {
+        for (const alias of Object.keys(request.customData)) {
+          const dataVal = request.customData[alias];
+          if (dataVal && typeof dataVal === "object") {
+            renderer.addCustomDataSource({
+              alias: alias,
+              format: render.DataSource.OBJECT,
+              data: dataVal,
+            });
+          }
+        }
+      }
+
+      // 5. Evaluate FreeMarker if requested or needed for BFO error diagnostics
+      let evaluatedXml = null;
+      if (request.returnEvaluatedXml) {
+        evaluatedXml = renderer.renderAsString();
+      }
+
+      // 6. Render as PDF binary
+      let pdfBase64;
+      try {
+        const pdfFile = renderer.renderAsPdf();
+        pdfBase64 = pdfFile.getContents();
+      } catch (renderErr) {
+        // Attempt to capture the FreeMarker-evaluated XML so the agent can see the exact BFO error context
+        if (evaluatedXml === null) {
+          try {
+            evaluatedXml = renderer.renderAsString();
+          } catch {
+            // Ignore if FreeMarker evaluation itself failed
+          }
+        }
+        const errMsg = getErrorMessage(renderErr);
+        return {
+          success: false,
+          errorMessage: `PDF rendering failed: ${errMsg}`,
+          ...(evaluatedXml ? { evaluatedXml: evaluatedXml } : {}),
+        };
+      }
+
+      const timeElapsedMS = timer.elapsed;
+      const governanceUsed = startGovernance - script.getRemainingUsage();
+
+      return {
+        success: true,
+        scriptId: rawScriptId || null,
+        usedInlinePdfContent: Boolean(rawPdfContent),
+        recordType: recordType,
+        resolvedRecordId: resolvedRecordId,
+        isAutoSampled: isAutoSampled,
+        searchId: searchId,
+        pdfBase64: pdfBase64,
+        ...(evaluatedXml !== null ? { evaluatedXml: evaluatedXml } : {}),
+        timeElapsedMS: timeElapsedMS,
+        governanceUsed: governanceUsed,
+      };
+    } catch (e) {
+      return makeErrorResponse(`Unable to render Advanced PDF Template: ${getErrorMessage(e)}`);
+    }
+  }
+
+  /**
+   * ACTION: RENDER_EMAIL_TEMPLATE
+   * Uses N/render.mergeEmail to render an Email Template (custemailtmpl_*) with optional
+   * transaction, entity, recipient, customRecord, or supportCase records, returning the merged subject and HTML body.
+   *
+   * @param {Object} request
+   * @param {string} [request.scriptId]
+   * @param {number|string} [request.templateId]
+   * @param {number|string} [request.transactionId]
+   * @param {string} [request.transactionType]
+   * @param {string} [request.entityType]
+   * @param {number|string} [request.entityId]
+   * @param {string} [request.recipientType]
+   * @param {number|string} [request.recipientId]
+   * @param {string} [request.customRecordType]
+   * @param {number|string} [request.customRecordId]
+   * @param {number|string} [request.supportCaseId]
+   * @returns {Object}
+   */
+  function handleRenderEmailTemplate(request) {
+    const rawScriptId =
+      typeof request.scriptId === "string" ? request.scriptId.trim() : "";
+    const rawTemplateId =
+      request.templateId != null && String(request.templateId).trim() !== ""
+        ? String(request.templateId).trim()
+        : "";
+
+    if (!rawScriptId && !rawTemplateId) {
+      return makeErrorResponse('Either "scriptId" (e.g., "custemailtmpl_...") or numeric "templateId" is required.');
+    }
+
+    try {
+      const script = runtime.getCurrentScript();
+      const startGovernance = script.getRemainingUsage();
+      const timer = new ExecutionTimer();
+
+      let resolvedTemplateId = null;
+      let templateName = null;
+
+      if (rawTemplateId && /^\d+$/.test(rawTemplateId)) {
+        resolvedTemplateId = Number(rawTemplateId);
+      } else {
+        const lookupScriptId = (rawScriptId || rawTemplateId).replace(/'/g, "''");
+        const sql = `SELECT id, name FROM emailtemplate WHERE UPPER(scriptid) = UPPER('${lookupScriptId}')`;
+        const rows = query.runSuiteQL({ query: sql }).asMappedResults();
+        if (!rows || rows.length === 0) {
+          return makeErrorResponse(
+            `Email Template with scriptId "${rawScriptId || rawTemplateId}" was not found in NetSuite.`,
+          );
+        }
+        resolvedTemplateId = Number(rows[0].id);
+        templateName = rows[0].name || null;
+      }
+
+      const mergeOptions = {
+        templateId: resolvedTemplateId,
+      };
+
+      const boundRecords = {};
+
+      // 1. Transaction binding (explicit transactionId, or auto-sampled via transactionType)
+      if (request.transactionId != null && String(request.transactionId).trim() !== "") {
+        const txId = Number(String(request.transactionId).trim());
+        if (isNaN(txId) || txId <= 0) {
+          return makeErrorResponse(`Invalid "transactionId": "${request.transactionId}". Must be a positive integer.`);
+        }
+        mergeOptions.transactionId = txId;
+        boundRecords.transaction = { id: txId, isAutoSampled: false };
+      } else if (typeof request.transactionType === "string" && request.transactionType.trim() !== "") {
+        const txType = request.transactionType.trim();
+        const sampled = resolveOrAutoSampleRecordId(txType, null);
+        mergeOptions.transactionId = sampled.resolvedId;
+        boundRecords.transaction = {
+          type: txType,
+          id: sampled.resolvedId,
+          isAutoSampled: true,
+        };
+      }
+
+      // 2. Entity binding
+      if (typeof request.entityType === "string" && request.entityType.trim() !== "") {
+        const entType = request.entityType.trim();
+        const entSample = resolveOrAutoSampleRecordId(entType, request.entityId);
+        mergeOptions.entity = {
+          type: entType,
+          id: entSample.resolvedId,
+        };
+        boundRecords.entity = {
+          type: entType,
+          id: entSample.resolvedId,
+          isAutoSampled: entSample.isAutoSampled,
+        };
+      }
+
+      // 3. Recipient binding
+      if (typeof request.recipientType === "string" && request.recipientType.trim() !== "") {
+        const recType = request.recipientType.trim();
+        const recSample = resolveOrAutoSampleRecordId(recType, request.recipientId);
+        mergeOptions.recipient = {
+          type: recType,
+          id: recSample.resolvedId,
+        };
+        boundRecords.recipient = {
+          type: recType,
+          id: recSample.resolvedId,
+          isAutoSampled: recSample.isAutoSampled,
+        };
+      }
+
+      // 4. Custom Record binding
+      if (typeof request.customRecordType === "string" && request.customRecordType.trim() !== "") {
+        const crType = request.customRecordType.trim();
+        const crSample = resolveOrAutoSampleRecordId(crType, request.customRecordId);
+        mergeOptions.customRecord = {
+          type: crType,
+          id: crSample.resolvedId,
+        };
+        boundRecords.customRecord = {
+          type: crType,
+          id: crSample.resolvedId,
+          isAutoSampled: crSample.isAutoSampled,
+        };
+      }
+
+      // 5. Support Case binding
+      if (request.supportCaseId != null && String(request.supportCaseId).trim() !== "") {
+        const caseId = Number(String(request.supportCaseId).trim());
+        if (isNaN(caseId) || caseId <= 0) {
+          return makeErrorResponse(`Invalid "supportCaseId": "${request.supportCaseId}". Must be a positive integer.`);
+        }
+        mergeOptions.supportCaseId = caseId;
+        boundRecords.supportCase = { id: caseId, isAutoSampled: false };
+      }
+
+      const mergeResult = render.mergeEmail(mergeOptions);
+      const subject = mergeResult ? mergeResult.subject : "";
+      const body = mergeResult ? mergeResult.body : "";
+
+      const timeElapsedMS = timer.elapsed;
+      const governanceUsed = startGovernance - script.getRemainingUsage();
+
+      return {
+        success: true,
+        scriptId: rawScriptId || null,
+        templateId: resolvedTemplateId,
+        ...(templateName ? { templateName: templateName } : {}),
+        boundRecords: boundRecords,
+        subject: subject,
+        body: body,
+        timeElapsedMS: timeElapsedMS,
+        governanceUsed: governanceUsed,
+      };
+    } catch (e) {
+      return makeErrorResponse(`Unable to render Email Template: ${getErrorMessage(e)}`);
+    }
+  }
+
   // =========================================================================
   // ACTION DISPATCHER
   // =========================================================================
@@ -1264,6 +1614,8 @@ define(["N/config", "N/log", "N/query", "N/record", "N/runtime", "N/search", "N/
     [MCP_ACTION.CREATE_RECORD]: handleCreateRecord,
     [MCP_ACTION.GET_SUPPORTED_LOCALES]: handleGetSupportedLocales,
     [MCP_ACTION.GET_TRANSLATIONS]: handleGetTranslations,
+    [MCP_ACTION.RENDER_PDF_TEMPLATE]: handleRenderPdfTemplate,
+    [MCP_ACTION.RENDER_EMAIL_TEMPLATE]: handleRenderEmailTemplate,
   };
 
   /**
