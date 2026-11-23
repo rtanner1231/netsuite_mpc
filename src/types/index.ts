@@ -4,6 +4,7 @@ export interface ToolMetadata {
     isDestructive: boolean;
     requiresSdf: boolean;
     alwaysAvailable?: boolean;
+    category?: string;
 }
 
 export type ToolContentItem =

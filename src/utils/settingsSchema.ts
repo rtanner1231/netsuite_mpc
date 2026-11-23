@@ -20,6 +20,65 @@ export interface GlobalSectionSchema {
     fields: FieldSchema[];
 }
 
+export interface ToolCategorySchema {
+    id: string;
+    title: string;
+}
+
+export const TOOL_CATEGORIES: ToolCategorySchema[] = [
+    { id: "table_discovery", title: "Table & Schema Discovery" },
+    { id: "data_operations", title: "Data Querying & Record Operations" },
+    { id: "script_execution", title: "Script Execution & Log Inspection" },
+    { id: "sdf_file_deployment", title: "SDF File Deployment" },
+    { id: "custom_objects", title: "Custom Objects (Records & Lists)" },
+    { id: "translations", title: "Translation Collections" },
+    { id: "templates", title: "Templates (Advanced PDF & Email)" }
+];
+
+export const TOOL_CATEGORY_BY_NAME: Record<string, string> = {
+    // 1. Table & Schema Discovery
+    netsuite_search_tables: "table_discovery",
+    netsuite_get_fields: "table_discovery",
+    netsuite_get_related_tables: "table_discovery",
+    netsuite_rebuild_vector_database: "table_discovery",
+    netsuite_rebuild_vector_database_status: "table_discovery",
+
+    // 2. Data Querying & Record Operations
+    netsuite_run_suite_ql: "data_operations",
+    netsuite_load_record_sample: "data_operations",
+    netsuite_create_record: "data_operations",
+
+    // 3. Script Execution & Log Inspection
+    netsuite_run_function: "script_execution",
+    netsuite_get_run_function_logs: "script_execution",
+    netsuite_get_script_logs: "script_execution",
+
+    // 4. SDF File Deployment
+    netsuite_upload_file: "sdf_file_deployment",
+    netsuite_compare_files: "sdf_file_deployment",
+
+    // 5. Custom Objects (Records & Lists)
+    netsuite_create_custom_record: "custom_objects",
+    netsuite_update_custom_record: "custom_objects",
+    netsuite_create_custom_list: "custom_objects",
+
+    // 6. Translation Collections
+    netsuite_list_supported_locales: "translations",
+    netsuite_list_translation_collections: "translations",
+    netsuite_view_translation_collection: "translations",
+    netsuite_create_translation_collection: "translations",
+    netsuite_update_translation_collection: "translations",
+
+    // 7. Templates (Advanced PDF & Email)
+    netsuite_list_templates: "templates",
+    netsuite_read_advanced_pdf_template: "templates",
+    netsuite_upsert_advanced_pdf_template: "templates",
+    netsuite_render_advanced_pdf_template: "templates",
+    netsuite_read_email_template: "templates",
+    netsuite_upsert_email_template: "templates",
+    netsuite_render_email_template: "templates"
+};
+
 export const ENVIRONMENT_CREDENTIAL_FIELDS: FieldSchema[] = [
     {
         key: "accountId",

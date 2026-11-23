@@ -20,7 +20,12 @@ import {
     saveAppConfig,
     setOrClearActiveEnvironment
 } from "./config.js";
-import { ENVIRONMENT_CREDENTIAL_FIELDS, getGlobalSectionsSchema } from "./settingsSchema.js";
+import {
+    ENVIRONMENT_CREDENTIAL_FIELDS,
+    TOOL_CATEGORIES,
+    TOOL_CATEGORY_BY_NAME,
+    getGlobalSectionsSchema
+} from "./settingsSchema.js";
 import { renderSettingsHtml } from "./settingsHtml.js";
 import { callNetsuiteRestletWithCredentials } from "./api.js";
 import { getLanceDbPath, getSqliteDbPath } from "./vectorDb.js";
@@ -423,7 +428,8 @@ const ensureSettingsServerRunning = async (
                         name: t.name,
                         description: t.description,
                         isDestructive: Boolean(t.meta.isDestructive),
-                        requiresSdf: Boolean(t.meta.requiresSdf)
+                        requiresSdf: Boolean(t.meta.requiresSdf),
+                        category: t.meta.category || TOOL_CATEGORY_BY_NAME[t.name] || "other"
                     }));
 
                 sendJson(res, 200, {
@@ -435,6 +441,7 @@ const ensureSettingsServerRunning = async (
                     schema: {
                         environmentCredentialFields: ENVIRONMENT_CREDENTIAL_FIELDS,
                         globalSections: getGlobalSectionsSchema(),
+                        toolCategories: TOOL_CATEGORIES,
                         tools
                     }
                 });

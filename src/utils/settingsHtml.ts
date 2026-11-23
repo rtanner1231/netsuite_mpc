@@ -566,7 +566,52 @@ export const renderSettingsHtml = (token: string): string => {
             border-top: 1px solid var(--border-color);
             display: flex;
             flex-direction: column;
+            gap: 14px;
+        }
+        .tool-section {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.4);
+            overflow: hidden;
+        }
+        .tool-section-header {
+            padding: 10px 14px;
+            background: rgba(30, 41, 59, 0.75);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .tool-section-title-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .tool-section-title {
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .tool-section-count {
+            font-size: 0.76rem;
+            color: var(--text-secondary);
+        }
+        .tool-section-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .tool-section-body {
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
             gap: 8px;
+        }
+        .tool-section-body .toggle-row {
+            margin-bottom: 0;
         }
         .tool-row.locked {
             opacity: 0.72;
@@ -709,6 +754,7 @@ export const renderSettingsHtml = (token: string): string => {
             schema: {
                 environmentCredentialFields: [],
                 globalSections: [],
+                toolCategories: [],
                 tools: []
             }
         };
@@ -1292,54 +1338,131 @@ export const renderSettingsHtml = (token: string): string => {
                 \`;
             });
 
-            // Build individual tools list
-            const selectableTools = appState.schema.tools;
+            // Build individual tools list grouped by category
+            const selectableTools = appState.schema.tools || [];
+            const definedCategories = Array.isArray(appState.schema.toolCategories) && appState.schema.toolCategories.length > 0
+                ? appState.schema.toolCategories
+                : [
+                    { id: "table_discovery", title: "Table & Schema Discovery" },
+                    { id: "data_operations", title: "Data Querying & Record Operations" },
+                    { id: "script_execution", title: "Script Execution & Log Inspection" },
+                    { id: "sdf_file_deployment", title: "SDF File Deployment" },
+                    { id: "custom_objects", title: "Custom Objects (Records & Lists)" },
+                    { id: "translations", title: "Translation Collections" },
+                    { id: "templates", title: "Templates (Advanced PDF & Email)" }
+                ];
+
+            const categoryList = [...definedCategories];
+            const knownCategoryIds = new Set(categoryList.map(c => c.id));
+            if (selectableTools.some(t => !t.category || !knownCategoryIds.has(t.category))) {
+                categoryList.push({ id: "other", title: "Other Tools" });
+            }
+
             let individualDisabledCount = 0;
+            let toolsSectionsHtml = "";
 
-            let toolsRowsHtml = "";
-            selectableTools.forEach(tool => {
-                const lockedByDestructive = tool.isDestructive && env.tools.disableDestructive === true;
-                const lockedBySdfSetting = tool.requiresSdf && env.tools.disableSdf === true;
-                const lockedByMissingSdfId = tool.requiresSdf && sdfIdMissing;
-                const isLocked = lockedByDestructive || lockedBySdfSetting || lockedByMissingSdfId;
+            categoryList.forEach(cat => {
+                const sectionTools = selectableTools.filter(t => {
+                    const toolCat = (t.category && knownCategoryIds.has(t.category)) ? t.category : "other";
+                    return toolCat === cat.id;
+                });
 
-                const isIndividuallyDisabled = env.tools.disabledTools.includes(tool.name);
-                if (isIndividuallyDisabled || isLocked) {
-                    individualDisabledCount++;
+                if (sectionTools.length === 0) {
+                    return;
                 }
 
-                let lockReasons = [];
-                if (lockedByDestructive) {
-                    lockReasons.push("Disabled by 'Disable Destructive Tools' setting");
-                }
-                if (lockedBySdfSetting) {
-                    lockReasons.push("Disabled by 'Disable SDF Tools' setting");
-                } else if (lockedByMissingSdfId) {
-                    lockReasons.push("Disabled because 'SDF Auth ID (sdfId)' is not configured");
-                }
+                let sectionEnabledCount = 0;
+                let sectionUnlockedCount = 0;
+                let sectionUnlockedDisabledCount = 0;
+                let sectionRowsHtml = "";
 
-                const isEnabled = !isLocked && !isIndividuallyDisabled;
+                sectionTools.forEach(tool => {
+                    const lockedByDestructive = tool.isDestructive && env.tools.disableDestructive === true;
+                    const lockedBySdfSetting = tool.requiresSdf && env.tools.disableSdf === true;
+                    const lockedByMissingSdfId = tool.requiresSdf && sdfIdMissing;
+                    const isLocked = lockedByDestructive || lockedBySdfSetting || lockedByMissingSdfId;
 
-                toolsRowsHtml += \`
-                    <div class="toggle-row tool-row \${isLocked ? 'locked' : ''}">
-                        <div class="toggle-info">
-                            <div class="toggle-title">
-                                <code>\${escapeHtml(tool.name)}</code>
-                                \${tool.isDestructive ? '<span class="badge badge-destructive">Destructive</span>' : ''}
-                                \${tool.requiresSdf ? '<span class="badge badge-sdf">Requires SDF</span>' : ''}
+                    const isIndividuallyDisabled = env.tools.disabledTools.includes(tool.name);
+                    if (isIndividuallyDisabled || isLocked) {
+                        individualDisabledCount++;
+                    }
+
+                    if (!isLocked) {
+                        sectionUnlockedCount++;
+                        if (isIndividuallyDisabled) {
+                            sectionUnlockedDisabledCount++;
+                        }
+                    }
+
+                    let lockReasons = [];
+                    if (lockedByDestructive) {
+                        lockReasons.push("Disabled by 'Disable Destructive Tools' setting");
+                    }
+                    if (lockedBySdfSetting) {
+                        lockReasons.push("Disabled by 'Disable SDF Tools' setting");
+                    } else if (lockedByMissingSdfId) {
+                        lockReasons.push("Disabled because 'SDF Auth ID (sdfId)' is not configured");
+                    }
+
+                    const isEnabled = !isLocked && !isIndividuallyDisabled;
+                    if (isEnabled) {
+                        sectionEnabledCount++;
+                    }
+
+                    sectionRowsHtml += \`
+                        <div class="toggle-row tool-row \${isLocked ? 'locked' : ''}">
+                            <div class="toggle-info">
+                                <div class="toggle-title">
+                                    <code>\${escapeHtml(tool.name)}</code>
+                                    \${tool.isDestructive ? '<span class="badge badge-destructive">Destructive</span>' : ''}
+                                    \${tool.requiresSdf ? '<span class="badge badge-sdf">Requires SDF</span>' : ''}
+                                </div>
+                                <div class="toggle-desc">\${escapeHtml(tool.description)}</div>
+                                \${lockReasons.length > 0 ? \`<div class="toggle-note">⚠️ \${escapeHtml(lockReasons.join(" & "))}</div>\` : ''}
                             </div>
-                            <div class="toggle-desc">\${escapeHtml(tool.description)}</div>
-                            \${lockReasons.length > 0 ? \`<div class="toggle-note">⚠️ \${escapeHtml(lockReasons.join(" & "))}</div>\` : ''}
+                            <label class="switch" title="\${isLocked ? escapeHtml(lockReasons.join(', ')) : 'Toggle tool availability'}">
+                                <input
+                                    type="checkbox"
+                                    \${isEnabled ? "checked" : ""}
+                                    \${isLocked ? "disabled" : ""}
+                                    onchange="toggleIndividualTool('\${tool.name}', this.checked)"
+                                />
+                                <span class="slider"></span>
+                            </label>
                         </div>
-                        <label class="switch" title="\${isLocked ? escapeHtml(lockReasons.join(', ')) : 'Toggle tool availability'}">
-                            <input
-                                type="checkbox"
-                                \${isEnabled ? "checked" : ""}
-                                \${isLocked ? "disabled" : ""}
-                                onchange="toggleIndividualTool('\${tool.name}', this.checked)"
-                            />
-                            <span class="slider"></span>
-                        </label>
+                    \`;
+                });
+
+                const canTurnAllOn = sectionUnlockedCount > 0 && sectionUnlockedDisabledCount > 0;
+                const canTurnAllOff = sectionEnabledCount > 0;
+
+                toolsSectionsHtml += \`
+                    <div class="tool-section">
+                        <div class="tool-section-header">
+                            <div class="tool-section-title-wrap">
+                                <span class="tool-section-title">\${escapeHtml(cat.title)}</span>
+                                <span class="tool-section-count">\${sectionEnabledCount} of \${sectionTools.length} enabled</span>
+                            </div>
+                            <div class="tool-section-actions">
+                                <button
+                                    type="button"
+                                    class="btn btn-sm"
+                                    \${canTurnAllOn ? "" : "disabled"}
+                                    onclick="toggleToolCategory('\${escapeHtml(cat.id)}', true)"
+                                    title="Enable all available tools in this section"
+                                >All On</button>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm"
+                                    \${canTurnAllOff ? "" : "disabled"}
+                                    onclick="toggleToolCategory('\${escapeHtml(cat.id)}', false)"
+                                    title="Disable all tools in this section"
+                                >All Off</button>
+                            </div>
+                        </div>
+                        <div class="tool-section-body">
+                            \${sectionRowsHtml}
+                        </div>
                     </div>
                 \`;
             });
@@ -1452,10 +1575,10 @@ export const renderSettingsHtml = (token: string): string => {
                             </span>
                         </summary>
                         <div class="tools-list">
-                            <div class="help-text" style="margin-bottom: 6px;">
+                            <div class="help-text" style="margin-bottom: 2px;">
                                 System tools (<code>netsuite_list_environments</code>, <code>netsuite_switch_environment</code>, <code>netsuite_open_settings</code>) are always available and cannot be disabled.
                             </div>
-                            \${toolsRowsHtml}
+                            \${toolsSectionsHtml}
                         </div>
                     </details>
                 </div>
@@ -1530,6 +1653,60 @@ export const renderSettingsHtml = (token: string): string => {
             } else if (enabled && idx !== -1) {
                 env.tools.disabledTools.splice(idx, 1);
             }
+            markDirty(true);
+
+            const detailsWasOpen = document.getElementById("individualToolsDetails")?.open;
+            renderEnvEditor();
+            if (detailsWasOpen) {
+                const d = document.getElementById("individualToolsDetails");
+                if (d) d.open = true;
+            }
+        }
+
+        function toggleToolCategory(categoryId, enableAll) {
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
+            const env = appState.environments[selectedEnvName];
+            if (!env.tools) env.tools = {};
+            if (!Array.isArray(env.tools.disabledTools)) env.tools.disabledTools = [];
+
+            const sdfIdMissing = !env.sdfId || String(env.sdfId).trim() === "";
+            const selectableTools = appState.schema.tools || [];
+            const definedCategories = Array.isArray(appState.schema.toolCategories) && appState.schema.toolCategories.length > 0
+                ? appState.schema.toolCategories
+                : [
+                    { id: "table_discovery" },
+                    { id: "data_operations" },
+                    { id: "script_execution" },
+                    { id: "sdf_file_deployment" },
+                    { id: "custom_objects" },
+                    { id: "translations" },
+                    { id: "templates" }
+                ];
+            const knownCategoryIds = new Set(definedCategories.map(c => c.id));
+
+            const sectionTools = selectableTools.filter(t => {
+                const toolCat = (t.category && knownCategoryIds.has(t.category)) ? t.category : "other";
+                return toolCat === categoryId;
+            });
+
+            sectionTools.forEach(tool => {
+                const lockedByDestructive = tool.isDestructive && env.tools.disableDestructive === true;
+                const lockedBySdfSetting = tool.requiresSdf && env.tools.disableSdf === true;
+                const lockedByMissingSdfId = tool.requiresSdf && sdfIdMissing;
+                const isLocked = lockedByDestructive || lockedBySdfSetting || lockedByMissingSdfId;
+
+                const idx = env.tools.disabledTools.indexOf(tool.name);
+                if (enableAll) {
+                    if (!isLocked && idx !== -1) {
+                        env.tools.disabledTools.splice(idx, 1);
+                    }
+                } else {
+                    if (!isLocked && idx === -1) {
+                        env.tools.disabledTools.push(tool.name);
+                    }
+                }
+            });
+
             markDirty(true);
 
             const detailsWasOpen = document.getElementById("individualToolsDetails")?.open;
