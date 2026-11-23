@@ -1134,18 +1134,12 @@ let previewDirPath: string | null = null;
 let exitHookRegistered = false;
 
 /**
- * Resolves the managed preview directory (preferring `/tmp/opencode/netsuite-mcp-previews` on Linux
- * when `/tmp/opencode` exists, otherwise `<os.tmpdir()>/netsuite-mcp-previews`) and registers a
+ * Resolves the managed preview directory (`<os.tmpdir()>/netsuite-mcp-previews`) and registers a
  * process exit cleanup hook so temporary preview files are automatically deleted when the MCP server exits.
  */
 export const ensureManagedPreviewDir = async (): Promise<string> => {
     if (!previewDirPath) {
-        const opencodeTmp = "/tmp/opencode";
-        if (await fileExists(opencodeTmp)) {
-            previewDirPath = path.join(opencodeTmp, "netsuite-mcp-previews");
-        } else {
-            previewDirPath = path.join(os.tmpdir(), "netsuite-mcp-previews");
-        }
+        previewDirPath = path.join(os.tmpdir(), "netsuite-mcp-previews");
     }
 
     await fs.mkdir(previewDirPath, { recursive: true });
