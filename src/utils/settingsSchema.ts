@@ -30,6 +30,7 @@ export const TOOL_CATEGORIES: ToolCategorySchema[] = [
     { id: "data_operations", title: "Data Querying & Record Operations" },
     { id: "script_execution", title: "Script Execution & Log Inspection" },
     { id: "sdf_file_deployment", title: "SDF File Deployment" },
+    { id: "script_management", title: "Script Management" },
     { id: "custom_objects", title: "Custom Objects (Records & Lists)" },
     { id: "translations", title: "Translation Collections" },
     { id: "templates", title: "Templates (Advanced PDF & Email)" }
@@ -57,19 +58,24 @@ export const TOOL_CATEGORY_BY_NAME: Record<string, string> = {
     netsuite_upload_file: "sdf_file_deployment",
     netsuite_compare_files: "sdf_file_deployment",
 
-    // 5. Custom Objects (Records & Lists)
+    // 5. Script Management
+    netsuite_deploy_script: "script_management",
+    netsuite_get_script: "script_management",
+    netsuite_search_scripts: "script_management",
+
+    // 6. Custom Objects (Records & Lists)
     netsuite_create_custom_record: "custom_objects",
     netsuite_update_custom_record: "custom_objects",
     netsuite_create_custom_list: "custom_objects",
 
-    // 6. Translation Collections
+    // 7. Translation Collections
     netsuite_list_supported_locales: "translations",
     netsuite_list_translation_collections: "translations",
     netsuite_view_translation_collection: "translations",
     netsuite_create_translation_collection: "translations",
     netsuite_update_translation_collection: "translations",
 
-    // 7. Templates (Advanced PDF & Email)
+    // 8. Templates (Advanced PDF & Email)
     netsuite_list_templates: "templates",
     netsuite_read_advanced_pdf_template: "templates",
     netsuite_upsert_advanced_pdf_template: "templates",

@@ -31,6 +31,9 @@ import { readEmailTemplateTool } from "./readEmailTemplate.js";
 import { upsertEmailTemplateTool } from "./upsertEmailTemplate.js";
 import { renderAdvancedPdfTemplateTool } from "./renderAdvancedPdfTemplate.js";
 import { renderEmailTemplateTool } from "./renderEmailTemplate.js";
+import { deployScriptTool } from "./deployScript.js";
+import { getScriptTool } from "./getScript.js";
+import { searchScriptsTool } from "./searchScripts.js";
 
 export const toolsRegistry = [
     listEnvironmentsTool,
@@ -42,6 +45,9 @@ export const toolsRegistry = [
     getRunFunctionLogsTool,
     uploadFileTool,
     compareFilesTool,
+    deployScriptTool,
+    getScriptTool,
+    searchScriptsTool,
     runFunctionTool,
     loadRecordSampleTool,
     createRecordTool,

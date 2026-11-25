@@ -45,20 +45,20 @@ export const writeTemporaryDeployXml = async (projectRoot: string, config: Deplo
 
     let tempXml = `<deploy>\n`;
 
-    if (config.objects && config.objects.length > 0) {
-        tempXml += `    <objects>\n`;
-        config.objects.forEach(p => {
-            tempXml += `        <path>${p}</path>\n`;
-        });
-        tempXml += `    </objects>\n`;
-    }
-
     if (config.files && config.files.length > 0) {
         tempXml += `    <files>\n`;
         config.files.forEach(p => {
             tempXml += `        <path>${p}</path>\n`;
         });
         tempXml += `    </files>\n`;
+    }
+
+    if (config.objects && config.objects.length > 0) {
+        tempXml += `    <objects>\n`;
+        config.objects.forEach(p => {
+            tempXml += `        <path>${p}</path>\n`;
+        });
+        tempXml += `    </objects>\n`;
     }
 
     if (config.translations && config.translations.length > 0) {
@@ -238,7 +238,10 @@ export const runSdfDeployInDir = async (
     projectDir: string
 ): Promise<{ success: boolean; output: string }> => {
     try {
-        const { stdout } = await execAsync(`suitecloud project:deploy`, { cwd: projectDir });
+        const { stdout } = await execAsync(
+            `suitecloud project:deploy --accountspecificvalues WARNING`,
+            { cwd: projectDir }
+        );
         return { success: true, output: `Success!\nOutput:\n${stdout}` };
     } catch (execError: any) {
         const errorOutput = execError.stdout || execError.stderr || execError.message;
@@ -289,7 +292,10 @@ export const runDeploymentPipeline = async (
         }
 
         try {
-            const { stdout } = await execAsync(`suitecloud project:deploy`, { cwd: projectRoot });
+            const { stdout } = await execAsync(
+                `suitecloud project:deploy --accountspecificvalues WARNING`,
+                { cwd: projectRoot }
+            );
             return { success: true, output: `Success!\nOutput:\n${stdout}` };
         } catch (execError: any) {
             const errorOutput = execError.stdout || execError.stderr || execError.message;

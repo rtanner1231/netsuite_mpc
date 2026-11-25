@@ -1347,6 +1347,7 @@ export const renderSettingsHtml = (token: string): string => {
                     { id: "data_operations", title: "Data Querying & Record Operations" },
                     { id: "script_execution", title: "Script Execution & Log Inspection" },
                     { id: "sdf_file_deployment", title: "SDF File Deployment" },
+                    { id: "script_management", title: "Script Management" },
                     { id: "custom_objects", title: "Custom Objects (Records & Lists)" },
                     { id: "translations", title: "Translation Collections" },
                     { id: "templates", title: "Templates (Advanced PDF & Email)" }

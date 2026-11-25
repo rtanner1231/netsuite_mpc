@@ -469,7 +469,7 @@ export const runProjectBuild = async (
     }
 };
 
-interface ParsedTsProject {
+export interface ParsedTsProject {
     tsconfigPath: string;
     tsconfigDir: string;
     commandLine: ts.ParsedCommandLine;
@@ -477,7 +477,7 @@ interface ParsedTsProject {
     outDir?: string;
 }
 
-const loadTsProject = async (
+export const loadTsProject = async (
     projectRoot: string,
     config: ProjectConfig
 ): Promise<ParsedTsProject | null> => {
@@ -558,6 +558,15 @@ const computeCommonDirectory = (dirs: string[]): string | undefined => {
 const toPosixPath = (p: string): string => p.replace(/\\/g, "/");
 
 /**
+ * Checks whether `childPath` is located inside `parentDir` safely across platforms
+ * (handling Windows case-insensitive drive letters and path separators).
+ */
+const isPathInsideDir = (parentDir: string, childPath: string): boolean => {
+    const rel = path.relative(path.resolve(parentDir), path.resolve(childPath));
+    return Boolean(rel && !rel.startsWith("..") && !path.isAbsolute(rel));
+};
+
+/**
  * Extracts the NetSuite File Cabinet path (starting with "/") from a local or relative path
  * if it contains a "FileCabinet" segment or is inside the SDF FileCabinet root.
  */
@@ -568,7 +577,7 @@ const extractFileCabinetPath = (
     const absTarget = path.resolve(targetPath);
     const absFcRoot = path.resolve(fileCabinetRoot);
 
-    if (absTarget.startsWith(absFcRoot + path.sep)) {
+    if (isPathInsideDir(absFcRoot, absTarget)) {
         const rel = toPosixPath(path.relative(absFcRoot, absTarget));
         return "/" + rel;
     }
@@ -677,7 +686,7 @@ export const resolveProjectFile = async (
             );
 
             const effectiveSource = sourceTsPath ?? path.resolve(projectRoot, trimmedInput.replace(/^[/\\]+/, ""));
-            const relToRoot = effectiveSource.startsWith(tsRoot + path.sep)
+            const relToRoot = isPathInsideDir(tsRoot, effectiveSource)
                 ? path.relative(tsRoot, effectiveSource)
                 : trimmedInput.replace(/^[/\\]+/, "");
             resolvedLocalJsPath = path.resolve(jsOut, relToRoot.replace(/\.ts$/i, ".js"));
@@ -704,7 +713,7 @@ export const resolveProjectFile = async (
 
             if (!resolvedLocalJsPath) {
                 if (resolvedTsProject.outDir && resolvedTsProject.rootDir) {
-                    if (sourceTsPath.startsWith(resolvedTsProject.rootDir + path.sep)) {
+                    if (isPathInsideDir(resolvedTsProject.rootDir, sourceTsPath)) {
                         const rel = path.relative(resolvedTsProject.rootDir, sourceTsPath);
                         resolvedLocalJsPath = path.resolve(
                             resolvedTsProject.outDir,
@@ -728,13 +737,15 @@ export const resolveProjectFile = async (
         }
     } else {
         // Non-TS file (e.g., .js)
+        // Note: on Windows, path.isAbsolute("/SuiteScripts/foo.js") is true (drive-relative),
+        // so always also check workspace-relative path.resolve(projectRoot, stripped).
         const stripped = trimmedInput.replace(/^[/\\]+/, "");
-        const directCandidate = path.isAbsolute(trimmedInput)
-            ? trimmedInput
-            : path.resolve(projectRoot, stripped);
+        const workspaceCandidate = path.resolve(projectRoot, stripped);
 
-        if (await fileExists(directCandidate)) {
-            resolvedLocalJsPath = directCandidate;
+        if (path.isAbsolute(trimmedInput) && (await fileExists(trimmedInput))) {
+            resolvedLocalJsPath = path.resolve(trimmedInput);
+        } else if (await fileExists(workspaceCandidate)) {
+            resolvedLocalJsPath = workspaceCandidate;
         } else {
             const fcPathFromInput = extractFileCabinetPath(trimmedInput, fileCabinetRoot);
             if (fcPathFromInput) {
