@@ -10,7 +10,8 @@ export const SUPPORTED_SCRIPT_TYPES = [
     "WORKFLOWACTION",
     "MASSUPDATE",
     "PORTLET",
-    "BUNDLEINSTALLATION"
+    "BUNDLEINSTALLATION",
+    "EVENTSUBSCRIBER"
 ] as const;
 
 export type ScriptTypeKey = (typeof SUPPORTED_SCRIPT_TYPES)[number];
@@ -25,7 +26,8 @@ export type SdfScriptRootElement =
     | "workflowactionscript"
     | "massupdatescript"
     | "portlet"
-    | "bundleinstallationscript";
+    | "bundleinstallationscript"
+    | "eventsubscriber";
 
 export interface ScriptTypeMetadata {
     key: ScriptTypeKey;
@@ -156,6 +158,15 @@ export const SCRIPT_TYPE_METADATA: Record<ScriptTypeKey, ScriptTypeMetadata> = {
             { exportName: "afterUpdate", sdfTag: "afterupdatefunction" },
             { exportName: "beforeUninstall", sdfTag: "beforeuninstallfunction" }
         ]
+    },
+    EVENTSUBSCRIBER: {
+        key: "EVENTSUBSCRIBER",
+        sdfRootElement: "eventsubscriber",
+        jsdocName: "EventSubscriber",
+        requiresRecordType: false,
+        supportsSchedule: false,
+        supportsDeploymentTitle: false,
+        entryPoints: [{ exportName: "handle", sdfTag: "defaultfunction" }]
     }
 };
 
@@ -286,6 +297,28 @@ export interface ScriptDeploymentInput {
     schedule?: DeploymentScheduleInput;
 }
 
+export type EventSubscriberEventType = "CREATED" | "UPDATED" | "DELETED";
+
+export interface EventSubscriberCriterionParameterInput {
+    /** Parameter name (defaults to 'RECORDTYPE'). */
+    name?: string;
+    /** Comparison operator (defaults to 'EQ'). */
+    operator?: string;
+    /** Value to compare against (e.g. 'SALESORDER', 'CUSTOMER', 'customrecord_foo'). */
+    value: string;
+}
+
+export interface EventSubscriberCriterionInput {
+    /** Event domain (defaults to 'RECORD'). */
+    domain?: "RECORD" | string;
+    /** Event type that triggers the subscriber: 'CREATED', 'UPDATED', or 'DELETED' (also accepts 'CREATE', 'UPDATE', 'EDIT', 'DELETE'). */
+    type: EventSubscriberEventType | string;
+    /** Target record type ID (e.g., 'SALESORDER', 'CUSTOMER', or 'customrecord_foo'). */
+    recordType?: string;
+    /** Optional explicit parameters array; defaults to [{ name: 'RECORDTYPE', operator: 'EQ', value: recordType }]. */
+    parameters?: EventSubscriberCriterionParameterInput[];
+}
+
 export interface DeployScriptInput {
     /**
      * Path to the script file (e.g., 'src/TypeScripts/my_ue.ts' or '/SuiteScripts/my_ue.js').
@@ -293,16 +326,17 @@ export interface DeployScriptInput {
      */
     filePath?: string;
     /**
-     * Custom script ID (e.g., 'customscript_my_ue'). Auto-prefixed with 'customscript_' if needed.
+     * Custom script ID (e.g., 'customscript_my_ue' for standard scripts [max 40 chars], or 'custevsub_my_sub' for Event Subscriber scripts [max 27 chars]).
+     * Auto-prefixed with 'customscript_' (or 'custevsub_' for EVENTSUBSCRIBER) if needed.
      * Optional when updating an existing script already linked to `filePath`.
      */
     scriptId?: string;
     /**
-     * Script type (e.g. 'USEREVENT', 'CLIENT', 'MAPREDUCE', 'SCHEDULED', 'SUITELET', 'RESTLET', 'WORKFLOWACTION', 'MASSUPDATE', 'PORTLET', 'BUNDLEINSTALLATION').
+     * Script type (e.g. 'USEREVENT', 'CLIENT', 'MAPREDUCE', 'SCHEDULED', 'SUITELET', 'RESTLET', 'WORKFLOWACTION', 'MASSUPDATE', 'PORTLET', 'BUNDLEINSTALLATION', 'EVENTSUBSCRIBER').
      * Auto-detected from `@NScriptType` in the file if omitted.
      */
     scriptType?: string;
-    /** Display name of the script record (required when creating a new script; max 40 chars). */
+    /** Display name of the script record (required when creating a new non-EVENTSUBSCRIBER script; max 40 chars). */
     name?: string;
     /** Description of the script record. */
     description?: string;
@@ -324,6 +358,8 @@ export interface DeployScriptInput {
     parameters?: ScriptParameterInput[];
     /** Script deployments (`customdeploy_*`) to add or update on the script record. */
     deployments?: ScriptDeploymentInput[];
+    /** For Event Subscriber (`EVENTSUBSCRIBER`) scripts: subscription criteria (`<criteria><criterion>...</criterion></criteria>`) defining which record events trigger the script. */
+    criteria?: EventSubscriberCriterionInput[];
     /** Additional helper/library file paths to compile and upload alongside the main script file. */
     additionalFiles?: string[];
     /** Skip running the project build command before uploading files. */
@@ -381,9 +417,9 @@ export interface GetScriptOptions {
 export interface SearchScriptsOptions {
     /** Filter by the target record type a script is deployed against (e.g., 'salesorder', 'customer', 'customrecord_foo'). */
     recordType?: string;
-    /** Filter by script type (e.g., 'USEREVENT', 'CLIENT', 'MAPREDUCE', 'SCHEDULED', 'SUITELET', 'RESTLET', 'WORKFLOWACTION', 'MASSUPDATE', 'PORTLET', 'BUNDLEINSTALLATION'). */
+    /** Filter by script type (e.g., 'USEREVENT', 'CLIENT', 'MAPREDUCE', 'SCHEDULED', 'SUITELET', 'RESTLET', 'WORKFLOWACTION', 'MASSUPDATE', 'PORTLET', 'BUNDLEINSTALLATION', 'EVENTSUBSCRIBER'). */
     scriptType?: string;
-    /** Partial case-insensitive search term matching script name, scriptId (customscript_*), deploymentId (customdeploy_*), deployment title, or script file name. */
+    /** Partial case-insensitive search term matching script name, scriptId (customscript_* or custevsub_*), deploymentId (customdeploy_*), deployment title, or script file name. */
     searchTerm?: string;
     /** Filter by script file name or File Cabinet path (e.g., 'my_script.js' or '/SuiteScripts/my_script.js'). */
     fileName?: string;
@@ -474,6 +510,10 @@ export const normalizeScriptTypeKey = (rawType: string): ScriptTypeKey => {
         case "BUNDLEINSTALLATION":
         case "BUNDLEINSTALL":
             return "BUNDLEINSTALLATION";
+        case "EVENTSUBSCRIBER":
+        case "EVSUB":
+        case "ES":
+            return "EVENTSUBSCRIBER";
         default:
             throw new Error(
                 `Unsupported scriptType '${rawType}'. Supported types are: ${SUPPORTED_SCRIPT_TYPES.join(", ")}.`
@@ -495,13 +535,14 @@ export const scriptTypeKeyFromSdfRoot = (rootElement: string): ScriptTypeKey | n
 };
 
 /**
- * Shared validator/normalizer for SDF prefixed IDs (`customscript_`, `customdeploy_`, `custscript_`).
+ * Shared validator/normalizer for SDF prefixed IDs (`customscript_`, `custevsub_`, `customdeploy_`, `custscript_`).
  */
 const normalizePrefixedSdfId = (
     rawId: string,
-    prefix: "customscript_" | "customdeploy_" | "custscript_",
+    prefix: "customscript_" | "custevsub_" | "customdeploy_" | "custscript_",
     label: string,
-    stripXmlSuffix = false
+    stripXmlSuffix = false,
+    maxLength = 40
 ): string => {
     let id = (rawId || "").trim();
     if (!id) {
@@ -524,9 +565,9 @@ const normalizePrefixedSdfId = (
         );
     }
 
-    if (id.length > 40) {
+    if (id.length > maxLength) {
         throw new Error(
-            `${label} '${id}' is ${id.length} characters long, exceeding the NetSuite SDF limit of 40 characters for ${prefix}* IDs.`
+            `${label} '${id}' is ${id.length} characters long, exceeding the NetSuite SDF limit of ${maxLength} characters for ${prefix}* IDs.`
         );
     }
 
@@ -534,10 +575,71 @@ const normalizePrefixedSdfId = (
 };
 
 /**
- * Normalizes and validates a NetSuite Script ID (`customscript_*`).
+ * Normalizes and validates a NetSuite Event Subscriber SDF ID (`custevsub_*`, max 27 chars).
+ * Also strips the trailing `_script` suffix that NetSuite automatically appends to `script.scriptid`
+ * in the SuiteQL `script` table for Event Subscriber records (e.g. `custevsub_foo_script` -> `custevsub_foo`).
  */
-export const normalizeCustomScriptId = (rawScriptId: string): string =>
-    normalizePrefixedSdfId(rawScriptId, "customscript_", "'scriptId'", true);
+export const normalizeEventSubscriberId = (rawScriptId: string): string => {
+    let cleaned = (rawScriptId || "").trim();
+    if (cleaned.toLowerCase().endsWith(".xml")) {
+        cleaned = cleaned.slice(0, -4).trim();
+    }
+    if (cleaned.toLowerCase().startsWith("customscript_")) {
+        cleaned = cleaned.slice("customscript_".length);
+    }
+    const lower = cleaned.toLowerCase();
+    const withPrefix = lower.startsWith("custevsub_")
+        ? lower
+        : `custevsub_${lower.replace(/^_+/, "")}`;
+    const withoutAutoScriptSuffix =
+        withPrefix.endsWith("_script") && withPrefix.length > "custevsub__script".length
+            ? withPrefix.slice(0, -"_script".length)
+            : withPrefix;
+    return normalizePrefixedSdfId(withoutAutoScriptSuffix, "custevsub_", "'scriptId'", true, 27);
+};
+
+/**
+ * Converts a SuiteQL `script.scriptid` value into the canonical SDF object `scriptid`.
+ * For Event Subscriber scripts (`custevsub_*`), NetSuite stores `<sdf_scriptid>_script` in `script.scriptid`
+ * (up to 34 chars) and `<SDF_SCRIPTID>` in `script.name`; this helper returns the base SDF `custevsub_*` ID.
+ */
+export const canonicalizeSuiteQlScriptId = (
+    rawSuiteQlScriptId: string,
+    scriptName?: string,
+    scriptType?: string
+): string => {
+    const lowerId = (rawSuiteQlScriptId || "").trim().toLowerCase();
+    const lowerName = (scriptName || "").trim().toLowerCase();
+    const upperType = (scriptType || "").trim().toUpperCase();
+
+    if (
+        (lowerId.startsWith("custevsub_") || upperType.includes("EVENTSUBSCRIBER")) &&
+        lowerId.endsWith("_script")
+    ) {
+        if (lowerName.startsWith("custevsub_") && lowerId === `${lowerName}_script`) {
+            return lowerName;
+        }
+        if (lowerId.length > "custevsub__script".length) {
+            return lowerId.slice(0, -"_script".length);
+        }
+    }
+
+    return lowerId;
+};
+
+/**
+ * Normalizes and validates a NetSuite Script ID (`customscript_*`, or `custevsub_*` for Event Subscriber scripts).
+ */
+export const normalizeCustomScriptId = (
+    rawScriptId: string,
+    scriptTypeKey?: ScriptTypeKey
+): string => {
+    const trimmed = (rawScriptId || "").trim();
+    if (scriptTypeKey === "EVENTSUBSCRIBER" || trimmed.toLowerCase().startsWith("custevsub_")) {
+        return normalizeEventSubscriberId(trimmed);
+    }
+    return normalizePrefixedSdfId(trimmed, "customscript_", "'scriptId'", true, 40);
+};
 
 /**
  * Normalizes and validates a NetSuite Script Deployment ID (`customdeploy_*`).

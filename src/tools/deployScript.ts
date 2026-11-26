@@ -11,9 +11,9 @@ import {
 export const deployScriptTool: ToolDefinition = {
     name: "netsuite_deploy_script",
     description:
-        "Creates or updates (upserts) a NetSuite Script record (customscript_*), its script parameters (custscript_*), and its deployments/schedules (customdeploy_*), " +
+        "Creates or updates (upserts) a NetSuite Script record (customscript_* or custevsub_*), its script parameters (custscript_*), and its deployments/schedules (customdeploy_*) or Event Subscriber criteria, " +
         "and conditionally builds and uploads the script file (.ts or .js) to the File Cabinet in a single atomic SDF deployment inside an isolated temporary SDF project. " +
-        "Supports all standard SuiteScript 2.x types (USEREVENT, CLIENT, MAPREDUCE, SCHEDULED, SUITELET, RESTLET, WORKFLOWACTION, MASSUPDATE, PORTLET, BUNDLEINSTALLATION) " +
+        "Supports all standard SuiteScript 2.x types (USEREVENT, CLIENT, MAPREDUCE, SCHEDULED, SUITELET, RESTLET, WORKFLOWACTION, MASSUPDATE, PORTLET, BUNDLEINSTALLATION, EVENTSUBSCRIBER) " +
         "with auto-detection from the file's @NScriptType JSDoc tag. " +
         "Includes duplicate-script protection: if the target script file already has an existing script record with a different scriptId, the tool halts and reports the existing scriptId unless forceCreateNewScript is set to true.",
     meta: {
@@ -27,12 +27,12 @@ export const deployScriptTool: ToolDefinition = {
                 type: "string",
                 description:
                     "Path to the script file (e.g., 'src/TypeScripts/my_ue.ts', 'TypeScripts/my_ue.ts', or '/SuiteScripts/my_ue.js'). " +
-                    "Required when creating a new script or uploading code changes. Optional if you are only updating parameters, schedules, or deployments on an existing script by scriptId."
+                    "Required when creating a new script or uploading code changes. Optional if you are only updating parameters, schedules, deployments, or criteria on an existing script by scriptId."
             },
             scriptId: {
                 type: "string",
                 description:
-                    "The custom script ID (e.g., 'customscript_my_ue'; auto-prefixed with 'customscript_' if omitted, max 40 chars). " +
+                    "The custom script ID (e.g., 'customscript_my_ue' for standard scripts [auto-prefixed with 'customscript_', max 40 chars], or 'custevsub_my_sub' for Event Subscriber scripts [auto-prefixed with 'custevsub_', max 27 chars]). " +
                     "Optional when updating an existing script record that is already linked to 'filePath'."
             },
             scriptType: {
@@ -44,7 +44,7 @@ export const deployScriptTool: ToolDefinition = {
             name: {
                 type: "string",
                 description:
-                    "Display name of the script record (max 40 characters). Required when creating a new script record; optional when updating an existing script."
+                    "Display name of the script record (max 40 characters). Required when creating a new non-EVENTSUBSCRIBER script record; optional when updating an existing script (not used for EVENTSUBSCRIBER scripts)."
             },
             description: {
                 type: "string",
@@ -308,6 +308,57 @@ export const deployScriptTool: ToolDefinition = {
                             required: ["frequency"]
                         }
                     }
+                }
+            },
+            criteria: {
+                type: "array",
+                description:
+                    "(Required for new EVENTSUBSCRIBER scripts) Array of event subscription criteria defining which record events trigger the Event Subscriber's handle(options) entry point. " +
+                    "When updating an existing EVENTSUBSCRIBER, providing 'criteria' replaces its subscription criteria list.",
+                items: {
+                    type: "object",
+                    properties: {
+                        domain: {
+                            type: "string",
+                            enum: ["RECORD"],
+                            description: "(Optional) Event domain (defaults to 'RECORD')."
+                        },
+                        type: {
+                            type: "string",
+                            enum: ["CREATED", "UPDATED", "DELETED"],
+                            description:
+                                "The record event type that triggers the Event Subscriber script ('CREATED', 'UPDATED', or 'DELETED')."
+                        },
+                        recordType: {
+                            type: "string",
+                            description:
+                                "Target record type ID to subscribe to (e.g. 'SALESORDER', 'CUSTOMER', 'INVOICE', or 'customrecord_...')."
+                        },
+                        parameters: {
+                            type: "array",
+                            description:
+                                "(Optional) Explicit filter parameter array if not using the shorthand 'recordType' property.",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string",
+                                        description: "Parameter name (defaults to 'RECORDTYPE')."
+                                    },
+                                    operator: {
+                                        type: "string",
+                                        description: "Comparison operator (defaults to 'EQ')."
+                                    },
+                                    value: {
+                                        type: "string",
+                                        description: "Value to compare against (e.g. 'SALESORDER' or 'customrecord_...')."
+                                    }
+                                },
+                                required: ["value"]
+                            }
+                        }
+                    },
+                    required: ["type"]
                 }
             },
             additionalFiles: {

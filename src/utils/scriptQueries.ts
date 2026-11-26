@@ -14,17 +14,22 @@ import {
 } from "./project.js";
 import { TempSdfProject, withTempSdfProject } from "./tempSdfProject.js";
 import {
+    canonicalizeSuiteQlScriptId,
     ensureArray,
     GetScriptOptions,
     isSdfTrue,
     normalizeCustomScriptId,
+    normalizeEventSubscriberId,
     normalizeScriptTypeKey,
     ParsedScriptXml,
     SdfScriptRootElement,
     SearchScriptsOptions,
     SuiteQlScriptMatch
 } from "./scriptTypes.js";
-import { parseScriptXmlString } from "./scriptXml.js";
+import {
+    extractEventSubscriberCriteriaSummary,
+    parseScriptXmlString
+} from "./scriptXml.js";
 
 const execAsync = util.promisify(exec);
 
@@ -40,14 +45,27 @@ const fileExists = async (targetPath: string): Promise<boolean> => {
 const isDeploymentEffectivelyActive = (
     scriptIsInactive: boolean,
     isDeployed: boolean,
-    status?: string
-): boolean =>
-    !scriptIsInactive &&
-    isDeployed &&
-    (status === "RELEASED" ||
-        status === "TESTING" ||
-        status === "SCHEDULED" ||
-        status === "INPROGRESS");
+    status?: string,
+    scriptType?: string,
+    scriptId?: string
+): boolean => {
+    if (scriptIsInactive) {
+        return false;
+    }
+    if (
+        (scriptType && scriptType.trim().toUpperCase().includes("EVENTSUBSCRIBER")) ||
+        (scriptId && scriptId.trim().toLowerCase().startsWith("custevsub_"))
+    ) {
+        return true;
+    }
+    return (
+        isDeployed &&
+        (status === "RELEASED" ||
+            status === "TESTING" ||
+            status === "SCHEDULED" ||
+            status === "INPROGRESS")
+    );
+};
 
 /**
  * Executes a SuiteQL query via the MCP RESTlet and returns the result rows array (or throws on error).
@@ -341,7 +359,11 @@ export const findLocalScriptXmlsForFileCabinetPath = async (
                     const parsed = parseScriptXmlString(fullPath, content);
                     if (!parsed) continue;
 
-                    const sf = String(parsed.rootObj.scriptfile || "").trim().toLowerCase();
+                    const sf = String(
+                        parsed.rootObj.scriptfile || parsed.rootObj.scriptfilepath || ""
+                    )
+                        .trim()
+                        .toLowerCase();
                     if (sf === targetScriptFileVal) {
                         const sid = String(
                             parsed.rootObj["@scriptid"] || entry.name.replace(/\.xml$/i, "")
@@ -414,9 +436,16 @@ export const findRemoteScriptsForFileCabinetPath = async (
                 continue;
             }
 
+            const rawSuiteQlScriptId = String(r.script_id || "").toLowerCase();
+            const canonicalScriptId = canonicalizeSuiteQlScriptId(
+                rawSuiteQlScriptId,
+                r.name != null ? String(r.name) : undefined,
+                r.script_type != null ? String(r.script_type) : undefined
+            );
+
             matches.push({
                 internalId: Number(r.internal_id),
-                scriptId: String(r.script_id || "").toLowerCase(),
+                scriptId: canonicalScriptId,
                 name: String(r.name || ""),
                 scriptType: String(r.script_type || ""),
                 description: r.description != null ? String(r.description) : undefined,
@@ -935,8 +964,35 @@ export const getScriptData = async (
         if (/^\d+$/.test(rawScriptId)) {
             whereClauses.push(`s.id = ${Number(rawScriptId)}`);
         } else {
-            const normId = normalizeCustomScriptId(rawScriptId).replace(/'/g, "''");
-            whereClauses.push(`LOWER(s.scriptid) = LOWER('${normId}')`);
+            const candidateIds = new Set<string>();
+            const lowerRaw = rawScriptId.trim().toLowerCase().replace(/\.xml$/i, "");
+            if (lowerRaw) {
+                candidateIds.add(lowerRaw);
+            }
+
+            if (lowerRaw.startsWith("custevsub_")) {
+                const normEvSub = normalizeEventSubscriberId(rawScriptId);
+                candidateIds.add(normEvSub);
+                candidateIds.add(`${normEvSub}_script`);
+            } else if (lowerRaw.startsWith("customscript_")) {
+                const normCustom = normalizeCustomScriptId(rawScriptId);
+                candidateIds.add(normCustom);
+            } else {
+                const normCustom = normalizeCustomScriptId(rawScriptId);
+                candidateIds.add(normCustom);
+                try {
+                    const normEvSub = normalizeEventSubscriberId(rawScriptId);
+                    candidateIds.add(normEvSub);
+                    candidateIds.add(`${normEvSub}_script`);
+                } catch {
+                    // Ignore if unprefixed ID is longer than the 27-char custevsub_ limit
+                }
+            }
+
+            const sqlList = Array.from(candidateIds)
+                .map((id) => `LOWER('${id.replace(/'/g, "''")}')`)
+                .join(", ");
+            whereClauses.push(`LOWER(s.scriptid) IN (${sqlList})`);
         }
     } else if (lookupFileName) {
         const escapedFile = lookupFileName.replace(/'/g, "''");
@@ -997,7 +1053,15 @@ export const getScriptData = async (
 
     for (const r of filteredScriptRows) {
         const sInternalId = Number(r.internal_id);
-        const sCustomId = String(r.script_id || "").toLowerCase();
+        const rawSuiteQlScriptId = String(r.script_id || "").toLowerCase();
+        const sCustomId = canonicalizeSuiteQlScriptId(
+            rawSuiteQlScriptId,
+            r.name != null ? String(r.name) : undefined,
+            r.script_type != null ? String(r.script_type) : undefined
+        );
+        const isEventSubscriber =
+            sCustomId.startsWith("custevsub_") ||
+            String(r.script_type || "").toUpperCase().includes("EVENTSUBSCRIBER");
         const fId = r.script_file_id != null ? Number(r.script_file_id) : undefined;
 
         const localObjectXml = await findLocalScriptXmlById(objectsDir, sCustomId);
@@ -1012,7 +1076,11 @@ export const getScriptData = async (
                         tempDirPrefix: "netsuite-mcp-script-read-"
                     },
                     async (tempProject) => {
-                        const imported = await tryImportScriptInTempProject(tempProject, sCustomId);
+                        const imported = await tryImportScriptInTempProject(
+                            tempProject,
+                            sCustomId,
+                            isEventSubscriber ? "eventsubscriber" : undefined
+                        );
                         if (!imported) return undefined;
                         const hydrated = await hydrateAccountSpecificValuesInParsedScript(
                             sCustomId,
@@ -1032,7 +1100,10 @@ export const getScriptData = async (
         }
 
         const xmlScriptFile =
-            sdfDefinition?.parsedObject?.scriptfile || localObjectXml?.rootObj?.scriptfile;
+            sdfDefinition?.parsedObject?.scriptfile ||
+            sdfDefinition?.parsedObject?.scriptfilepath ||
+            localObjectXml?.rootObj?.scriptfile ||
+            localObjectXml?.rootObj?.scriptfilepath;
         const rawFcPath =
             (typeof xmlScriptFile === "string" && xmlScriptFile.trim()
                 ? normalizeScriptFileCabinetPath(xmlScriptFile)
@@ -1047,14 +1118,28 @@ export const getScriptData = async (
             : undefined;
 
         const isInactive = isSdfTrue(r.is_inactive);
+        const scriptTypeStr = String(r.script_type || "");
         const deployments = (deploymentsByScriptInternalId.get(sInternalId) ?? []).map((d) => ({
             ...d,
-            isEffectivelyActive: isDeploymentEffectivelyActive(isInactive, d.isDeployed, d.status)
+            isEffectivelyActive: isDeploymentEffectivelyActive(
+                isInactive,
+                d.isDeployed,
+                d.status,
+                scriptTypeStr,
+                sCustomId
+            )
         }));
+
+        const criteriaSummary = extractEventSubscriberCriteriaSummary(
+            sdfDefinition?.parsedObject ?? localObjectXml?.rootObj
+        );
 
         enrichedScripts.push({
             internalId: sInternalId,
             scriptId: sCustomId,
+            ...(rawSuiteQlScriptId && rawSuiteQlScriptId !== sCustomId
+                ? { suiteQlScriptId: rawSuiteQlScriptId }
+                : {}),
             name: String(r.name || ""),
             scriptType: String(r.script_type || ""),
             description: r.description != null ? String(r.description) : undefined,
@@ -1092,6 +1177,7 @@ export const getScriptData = async (
                       rootElement: localObjectXml.rootElement
                   }
                 : { exists: false },
+            ...(criteriaSummary.length > 0 ? { criteria: criteriaSummary } : {}),
             deployments,
             ...(sdfDefinition ? { sdfDefinition } : {})
         });
@@ -1101,15 +1187,34 @@ export const getScriptData = async (
         const localFallbackMatches: Record<string, any>[] = [];
         if (rawScriptId && !/^\d+$/.test(rawScriptId)) {
             const normId = normalizeCustomScriptId(rawScriptId);
-            const localXml = await findLocalScriptXmlById(objectsDir, normId);
+            let localXml = await findLocalScriptXmlById(objectsDir, normId);
+            let matchedId = normId;
+            if (
+                !localXml &&
+                !rawScriptId.toLowerCase().startsWith("customscript_") &&
+                !rawScriptId.toLowerCase().startsWith("custevsub_")
+            ) {
+                try {
+                    const evSubId = normalizeEventSubscriberId(rawScriptId);
+                    const evSubXml = await findLocalScriptXmlById(objectsDir, evSubId);
+                    if (evSubXml) {
+                        localXml = evSubXml;
+                        matchedId = evSubId;
+                    }
+                } catch {
+                    // Ignore if rawScriptId exceeds 27 chars for custevsub_
+                }
+            }
             if (localXml) {
+                const criteriaSummary = extractEventSubscriberCriteriaSummary(localXml.rootObj);
                 localFallbackMatches.push({
-                    scriptId: normId,
+                    scriptId: matchedId,
                     source: "local_sdf_only",
                     localXmlPath: (
                         path.relative(projectRoot, localXml.xmlPath) || localXml.xmlPath
                     ).replace(/\\/g, "/"),
                     rootElement: localXml.rootElement,
+                    ...(criteriaSummary.length > 0 ? { criteria: criteriaSummary } : {}),
                     parsedObject: localXml.rootObj
                 });
             }
@@ -1175,6 +1280,8 @@ const getSuiteQlScriptTypeTokens = (rawScriptType: string): string[] => {
             return ["PORTLET"];
         case "BUNDLEINSTALLATION":
             return ["BUNDLEINSTALLATION", "BUNDLEINSTALLATIONSCRIPT"];
+        case "EVENTSUBSCRIBER":
+            return ["EVENTSUBSCRIBER", "EVENTSUBSCRIBERSCRIPT"];
     }
 };
 
@@ -1216,8 +1323,15 @@ export const searchScriptsInNetsuite = async (
     }
 
     if (options.isDeployed !== undefined) {
-        const flag = options.isDeployed ? "T" : "F";
-        whereClauses.push(`d.isdeployed = '${flag}'`);
+        if (options.isDeployed) {
+            whereClauses.push(
+                `(d.isdeployed = 'T' OR (UPPER(s.scripttype) = 'EVENTSUBSCRIBER' AND s.isinactive = 'F'))`
+            );
+        } else {
+            whereClauses.push(
+                `(d.isdeployed = 'F' AND UPPER(s.scripttype) <> 'EVENTSUBSCRIBER')`
+            );
+        }
     }
 
     if (options.status && options.status.trim() !== "") {
@@ -1287,9 +1401,19 @@ export const searchScriptsInNetsuite = async (
             const fId = r.script_file_id != null ? Number(r.script_file_id) : undefined;
             if (fId) fileIds.push(fId);
 
+            const rawSuiteQlScriptId = String(r.script_id || "").toLowerCase();
+            const canonicalScriptId = canonicalizeSuiteQlScriptId(
+                rawSuiteQlScriptId,
+                r.script_name != null ? String(r.script_name) : undefined,
+                r.script_type != null ? String(r.script_type) : undefined
+            );
+
             scriptsMap.set(sId, {
                 internalId: sId,
-                scriptId: String(r.script_id || "").toLowerCase(),
+                scriptId: canonicalScriptId,
+                ...(rawSuiteQlScriptId && rawSuiteQlScriptId !== canonicalScriptId
+                    ? { suiteQlScriptId: rawSuiteQlScriptId }
+                    : {}),
                 name: String(r.script_name || ""),
                 scriptType: String(r.script_type || ""),
                 description: r.script_description != null ? String(r.script_description) : undefined,
@@ -1316,7 +1440,9 @@ export const searchScriptsInNetsuite = async (
                 isEffectivelyActive: isDeploymentEffectivelyActive(
                     scriptEntry.isInactive,
                     isDep,
-                    statusStr
+                    statusStr,
+                    scriptEntry.scriptType,
+                    scriptEntry.scriptId
                 ),
                 recordType: r.record_type != null ? String(r.record_type) : undefined,
                 logLevel: r.log_level != null ? String(r.log_level) : undefined

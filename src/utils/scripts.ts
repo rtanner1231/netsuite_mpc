@@ -145,10 +145,16 @@ const resolveOrValidateTargetScriptId = async (args: {
     sdfSrcDir: string;
     input: DeployScriptInput;
     primaryResolvedFile?: ResolvedProjectFile;
+    sourceInspection: SourceInspectionResult;
 }): Promise<{ scriptId?: string; conflictMessage?: string }> => {
-    const { projectRoot, sdfSrcDir, input, primaryResolvedFile } = args;
+    const { projectRoot, sdfSrcDir, input, primaryResolvedFile, sourceInspection } = args;
+    const effectiveTypeKey = input.scriptType
+        ? normalizeScriptTypeKey(input.scriptType)
+        : sourceInspection.scriptType;
     const hasScriptId = Boolean(input.scriptId && input.scriptId.trim() !== "");
-    let requestedScriptId = hasScriptId ? normalizeCustomScriptId(input.scriptId!) : undefined;
+    let requestedScriptId = hasScriptId
+        ? normalizeCustomScriptId(input.scriptId!, effectiveTypeKey)
+        : undefined;
 
     if (!primaryResolvedFile) {
         return { scriptId: requestedScriptId };
@@ -239,6 +245,12 @@ const resolveOrValidateTargetScriptId = async (args: {
         };
     }
 
+    if (effectiveTypeKey === "EVENTSUBSCRIBER") {
+        throw new Error(
+            `No existing Event Subscriber script was found for '${primaryResolvedFile.fileCabinetPath}'. Please provide a 'scriptId' (e.g. 'custevsub_...', max 27 chars) and 'criteria' to create a new Event Subscriber script.`
+        );
+    }
+
     throw new Error(
         `No existing script record was found for '${primaryResolvedFile.fileCabinetPath}'. Please provide a 'scriptId' (e.g. 'customscript_...') and 'name' to create a new script record.`
     );
@@ -260,9 +272,10 @@ const loadExistingAndResolveScriptType = async (args: {
 }> => {
     const { tempProject, sdfSrcDir, finalScriptId, input, sourceInspection } = args;
 
-    const explicitTypeKey = input.scriptType
+    const explicitTypeKey: ScriptTypeKey | undefined = input.scriptType
         ? normalizeScriptTypeKey(input.scriptType)
-        : sourceInspection.scriptType;
+        : sourceInspection.scriptType ??
+          (finalScriptId.toLowerCase().startsWith("custevsub_") ? "EVENTSUBSCRIBER" : undefined);
     const knownRootElement = explicitTypeKey
         ? SCRIPT_TYPE_METADATA[explicitTypeKey].sdfRootElement
         : undefined;
@@ -359,7 +372,9 @@ const stageAndExecuteScriptDeploy = async (args: {
             deployFilesList.push(`~/FileCabinet${file.fileCabinetPath}`);
         }
     } else {
-        const rawScriptFile = String(orderedRootObj.scriptfile || "").trim();
+        const rawScriptFile = String(
+            orderedRootObj.scriptfile || orderedRootObj.scriptfilepath || ""
+        ).trim();
         if (rawScriptFile.startsWith("[") && rawScriptFile.endsWith("]")) {
             const fcPath = rawScriptFile.slice(1, -1).trim();
             if (fcPath) {
@@ -472,7 +487,8 @@ export const deployScriptInSdf = async (
             projectRoot,
             sdfSrcDir,
             input,
-            primaryResolvedFile
+            primaryResolvedFile,
+            sourceInspection
         });
 
     if (conflictMessage) {
@@ -497,13 +513,15 @@ export const deployScriptInSdf = async (
                 sourceInspection
             });
 
+            const effectiveScriptId = normalizeCustomScriptId(finalScriptId, scriptTypeKey);
+
             const accountTimeZone = SCRIPT_TYPE_METADATA[scriptTypeKey].supportsSchedule
                 ? await resolveNetsuiteAccountTimeZone(tempProject.environment)
                 : undefined;
 
             const { rootElement, orderedRootObj, xmlContent, objectDependencies } =
                 buildMergedScriptXml({
-                    finalScriptId,
+                    finalScriptId: effectiveScriptId,
                     scriptTypeKey,
                     input,
                     existingImport,
@@ -516,7 +534,7 @@ export const deployScriptInSdf = async (
                 tempProject,
                 projectRoot,
                 projectConfig: resolvedConfig,
-                finalScriptId,
+                finalScriptId: effectiveScriptId,
                 rootElement,
                 orderedRootObj,
                 xmlContent,

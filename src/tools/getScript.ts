@@ -6,10 +6,10 @@ import { getScriptData, GetScriptOptions } from "../utils/scripts.js";
 export const getScriptTool: ToolDefinition = {
     name: "netsuite_get_script",
     description:
-        "Loads comprehensive metadata for a NetSuite Script record (customscript_*) and all of its deployments (customdeploy_*), " +
-        "from either a scriptId (customscript_* or numeric internal ID) or a script file path/name (e.g., 'src/TypeScripts/my_ue.ts', '/SuiteScripts/my_ue.js', or 'my_ue.js'). " +
-        "Resolves the exact File Cabinet path, maps it to local workspace .ts/.js and Objects/<scriptId>.xml files, returns deployment status/recordType/logLevel/effective active state, " +
-        "and optionally downloads and parses the full SDF XML definition (when includeSdfXml: true) to inspect script parameters, parameter override values, and recurrence schedules.",
+        "Loads comprehensive metadata for a NetSuite Script record (customscript_* or custevsub_*) and all of its deployments (customdeploy_*) or Event Subscriber criteria, " +
+        "from either a scriptId (customscript_*, custevsub_*, or numeric internal ID) or a script file path/name (e.g., 'src/TypeScripts/my_ue.ts', '/SuiteScripts/my_ue.js', or 'my_ue.js'). " +
+        "Resolves the exact File Cabinet path, maps it to local workspace .ts/.js and Objects/<scriptId>.xml files, returns deployment status/recordType/logLevel/effective active state (and subscription criteria for Event Subscribers), " +
+        "and optionally downloads and parses the full SDF XML definition (when includeSdfXml: true) to inspect script parameters, parameter override values, recurrence schedules, or Event Subscriber criteria.",
     meta: {
         isDestructive: false,
         requiresSdf: false
@@ -20,7 +20,7 @@ export const getScriptTool: ToolDefinition = {
             scriptId: {
                 type: "string",
                 description:
-                    "(Optional) The script custom ID (e.g., 'customscript_my_ue') or numeric internal ID. Provide either 'scriptId' or 'filePath'."
+                    "(Optional) The script custom ID (e.g., 'customscript_my_ue', 'custevsub_my_sub') or numeric internal ID. Provide either 'scriptId' or 'filePath'."
             },
             filePath: {
                 type: "string",

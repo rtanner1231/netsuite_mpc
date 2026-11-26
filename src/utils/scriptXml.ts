@@ -7,6 +7,8 @@ import {
     DeployScriptInput,
     deriveDefaultDeploymentId,
     ensureArray,
+    EventSubscriberCriterionInput,
+    EventSubscriberEventType,
     normalizeCustomDeploymentId,
     normalizeScriptParamId,
     ParsedScriptXml,
@@ -802,8 +804,160 @@ export const orderScriptDeploymentNodeKeys = (
 };
 
 /**
+ * Normalizes an Event Subscriber event type string into 'CREATED', 'UPDATED', or 'DELETED'.
+ */
+export const normalizeEventSubscriberEventType = (
+    rawType: string
+): EventSubscriberEventType => {
+    const cleaned = (rawType || "").trim().toUpperCase();
+    switch (cleaned) {
+        case "CREATED":
+        case "CREATE":
+            return "CREATED";
+        case "UPDATED":
+        case "UPDATE":
+        case "EDIT":
+        case "EDITED":
+        case "XEDIT":
+            return "UPDATED";
+        case "DELETED":
+        case "DELETE":
+            return "DELETED";
+        default:
+            throw new Error(
+                `Invalid Event Subscriber criterion 'type' ('${rawType}'). Supported values are: CREATED, UPDATED, DELETED.`
+            );
+    }
+};
+
+/**
+ * Formats a record type value for an `<eventsubscriber>` `<parameter>` `<value>` tag.
+ * Standard record types are uppercased (e.g. `SALESORDER`); custom record / transaction script IDs
+ * are kept lowercase without `[scriptid=...]` wrappers (e.g. `customrecord_foo`).
+ */
+export const formatEventSubscriberRecordTypeValue = (rawRecordType: string): string => {
+    const trimmed = (rawRecordType || "").trim();
+    if (!trimmed) {
+        throw new Error("Event Subscriber criterion 'recordType' / parameter 'value' cannot be empty.");
+    }
+
+    const bracketMatch = trimmed.match(/^\[scriptid=([^\]]+)\]$/i);
+    const unwrapped = (bracketMatch ? bracketMatch[1] : trimmed).trim();
+
+    if (
+        unwrapped.toLowerCase().startsWith("customrecord_") ||
+        unwrapped.toLowerCase().startsWith("customtransaction_")
+    ) {
+        return unwrapped.toLowerCase();
+    }
+
+    return unwrapped.toUpperCase();
+};
+
+/**
+ * Builds the `<criteria><criterion>...</criterion></criteria>` node for an `<eventsubscriber>` SDF XML object.
+ */
+export const buildEventSubscriberCriteriaNode = (
+    criteriaInputs: EventSubscriberCriterionInput[]
+): { criterion: Record<string, any>[] } => {
+    if (!Array.isArray(criteriaInputs) || criteriaInputs.length === 0) {
+        throw new Error(
+            "Event Subscriber scripts require at least one subscription criterion in 'criteria' (e.g. criteria: [{ type: 'CREATED', recordType: 'SALESORDER' }])."
+        );
+    }
+
+    const criterionNodes = criteriaInputs.map((c, idx) => {
+        if (!c || typeof c !== "object") {
+            throw new Error(`Invalid criterion at index ${idx}.`);
+        }
+
+        const domain = (c.domain || "RECORD").trim().toUpperCase();
+        const type = normalizeEventSubscriberEventType(c.type);
+
+        let paramNodes: { name: string; operator: string; value: string }[] = [];
+        if (Array.isArray(c.parameters) && c.parameters.length > 0) {
+            paramNodes = c.parameters.map((p) => {
+                const name = (p.name || "RECORDTYPE").trim().toUpperCase();
+                const operator = (p.operator || "EQ").trim().toUpperCase();
+                const value =
+                    name === "RECORDTYPE"
+                        ? formatEventSubscriberRecordTypeValue(p.value)
+                        : String(p.value || "").trim();
+                if (!value) {
+                    throw new Error(
+                        `Event Subscriber criterion at index ${idx} has an empty parameter value.`
+                    );
+                }
+                return { name, operator, value };
+            });
+        } else if (c.recordType && c.recordType.trim()) {
+            paramNodes = [
+                {
+                    name: "RECORDTYPE",
+                    operator: "EQ",
+                    value: formatEventSubscriberRecordTypeValue(c.recordType)
+                }
+            ];
+        } else {
+            throw new Error(
+                `Event Subscriber criterion at index ${idx} requires 'recordType' (e.g. 'SALESORDER' or 'customrecord_...') or a non-empty 'parameters' array.`
+            );
+        }
+
+        return {
+            domain,
+            type,
+            parameters: {
+                parameter: paramNodes
+            }
+        };
+    });
+
+    return {
+        criterion: criterionNodes
+    };
+};
+
+/**
+ * Extracts a normalized summary array of subscription criteria from a parsed `<eventsubscriber>` root object.
+ */
+export const extractEventSubscriberCriteriaSummary = (
+    rootObj?: Record<string, any>
+): {
+    domain: string;
+    type: string;
+    recordType?: string;
+    parameters: { name: string; operator: string; value: string }[];
+}[] => {
+    if (!rootObj?.criteria?.criterion) {
+        return [];
+    }
+
+    const rawCriteria = ensureArray<Record<string, any>>(rootObj.criteria.criterion);
+    return rawCriteria.map((c) => {
+        const domain = String(c?.domain || "RECORD");
+        const type = String(c?.type || "");
+        const rawParams = ensureArray<Record<string, any>>(c?.parameters?.parameter);
+        const parameters = rawParams.map((p) => ({
+            name: String(p?.name || ""),
+            operator: String(p?.operator || ""),
+            value: String(p?.value || "")
+        }));
+        const recordTypeParam = parameters.find(
+            (p) => p.name.toUpperCase() === "RECORDTYPE"
+        );
+        return {
+            domain,
+            type,
+            ...(recordTypeParam ? { recordType: recordTypeParam.value } : {}),
+            parameters
+        };
+    });
+};
+
+/**
  * Reorders keys on an SDF script root object so header elements appear in canonical alphabetical
- * SDF schema order followed by `<scriptcustomfields>` and `<scriptdeployments>`.
+ * SDF schema order followed by `<criteria>`, `<scriptcustomfields>`, and `<scriptdeployments>`.
  */
 export const orderScriptRootObjectKeys = (rootObj: Record<string, any>): Record<string, any> => {
     const ordered: Record<string, any> = {};
@@ -816,6 +970,7 @@ export const orderScriptRootObjectKeys = (rootObj: Record<string, any>): Record<
         .filter(
             (k) =>
                 !k.startsWith("@") &&
+                k !== "criteria" &&
                 k !== "scriptcustomfields" &&
                 k !== "scriptdeployments" &&
                 rootObj[k] !== undefined
@@ -824,6 +979,10 @@ export const orderScriptRootObjectKeys = (rootObj: Record<string, any>): Record<
 
     for (const key of headerKeys) {
         ordered[key] = rootObj[key];
+    }
+
+    if (rootObj.criteria !== undefined) {
+        ordered.criteria = rootObj.criteria;
     }
 
     if (rootObj.scriptcustomfields !== undefined) {
@@ -944,6 +1103,56 @@ export const buildMergedScriptXml = (args: {
 
     const typeMeta = SCRIPT_TYPE_METADATA[scriptTypeKey];
     const rootElement = typeMeta.sdfRootElement;
+
+    if (scriptTypeKey === "EVENTSUBSCRIBER") {
+        const rootObj: Record<string, any> = existingImport
+            ? { ...existingImport.rootObj, "@scriptid": finalScriptId }
+            : { "@scriptid": finalScriptId };
+
+        if (fileCabinetPath) {
+            rootObj.scriptfilepath = `[${fileCabinetPath}]`;
+        } else if (!rootObj.scriptfilepath) {
+            throw new Error(
+                `'filePath' is required when creating a new Event Subscriber script ('${finalScriptId}' does not exist in NetSuite yet).`
+            );
+        }
+
+        if (Array.isArray(input.criteria) && input.criteria.length > 0) {
+            rootObj.criteria = buildEventSubscriberCriteriaNode(input.criteria);
+        } else if (
+            Array.isArray(input.deployments) &&
+            input.deployments.some((d) => Boolean(d.recordType && d.recordType.trim()))
+        ) {
+            const derivedCriteria: EventSubscriberCriterionInput[] = input.deployments
+                .filter((d) => Boolean(d.recordType && d.recordType.trim()))
+                .map((d) => ({
+                    domain: "RECORD",
+                    type: d.eventType || "CREATED",
+                    recordType: d.recordType!.trim()
+                }));
+            rootObj.criteria = buildEventSubscriberCriteriaNode(derivedCriteria);
+        } else if (!rootObj.criteria?.criterion) {
+            throw new Error(
+                `Creating a new 'EVENTSUBSCRIBER' script requires at least one subscription criterion in 'criteria' (e.g., criteria: [{ type: "CREATED", recordType: "SALESORDER" }]).`
+            );
+        }
+
+        const orderedRootObj = orderScriptRootObjectKeys(rootObj);
+        const objectDependencies = new Set<string>(
+            collectScriptObjectDependencies(orderedRootObj, finalScriptId)
+        );
+        const xmlContent = create(
+            { version: "1.0", encoding: "UTF-8" },
+            { [rootElement]: orderedRootObj }
+        ).end({ prettyPrint: true });
+
+        return {
+            rootElement,
+            orderedRootObj,
+            xmlContent,
+            objectDependencies
+        };
+    }
 
     let rootObj: Record<string, any>;
     if (existingImport) {

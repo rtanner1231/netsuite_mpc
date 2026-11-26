@@ -27,12 +27,12 @@ export const searchScriptsTool: ToolDefinition = {
                 type: "string",
                 enum: [...SUPPORTED_SCRIPT_TYPES],
                 description:
-                    "(Optional) Filter by script type (USEREVENT, CLIENT, MAPREDUCE, SCHEDULED, SUITELET, RESTLET, WORKFLOWACTION, MASSUPDATE, PORTLET, BUNDLEINSTALLATION)."
+                    "(Optional) Filter by script type (USEREVENT, CLIENT, MAPREDUCE, SCHEDULED, SUITELET, RESTLET, WORKFLOWACTION, MASSUPDATE, PORTLET, BUNDLEINSTALLATION, EVENTSUBSCRIBER)."
             },
             searchTerm: {
                 type: "string",
                 description:
-                    "(Optional) Case-insensitive partial match across script name, scriptId (customscript_*), deploymentId (customdeploy_*), deployment title, or script file name."
+                    "(Optional) Case-insensitive partial match across script name, scriptId (customscript_* or custevsub_*), deploymentId (customdeploy_*), deployment title, or script file name."
             },
             fileName: {
                 type: "string",
@@ -42,7 +42,7 @@ export const searchScriptsTool: ToolDefinition = {
             isDeployed: {
                 type: "boolean",
                 description:
-                    "(Optional) Filter by whether the deployment 'Deployed' checkbox is checked (true = only deployed, false = only undeployed)."
+                    "(Optional) Filter by whether the deployment 'Deployed' checkbox is checked (true = only deployed, false = only undeployed). Active EVENTSUBSCRIBER scripts are treated as deployed even though NetSuite's internal deployment row stores isdeployed = 'F'."
             },
             status: {
                 type: "string",
