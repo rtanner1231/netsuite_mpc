@@ -7,8 +7,9 @@
  * Provides endpoints for executing SuiteQL queries, retrieving script execution logs,
  * dynamically running SuiteScript functions, and inspecting record samples.
  */
-define(["N/config", "N/log", "N/query", "N/record", "N/render", "N/runtime", "N/search", "N/translation"], (
+define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/runtime", "N/search", "N/translation"], (
   config,
+  file,
   log,
   query,
   record,
@@ -31,6 +32,7 @@ define(["N/config", "N/log", "N/query", "N/record", "N/render", "N/runtime", "N/
     GET_TRANSLATIONS: "GET_TRANSLATIONS",
     RENDER_PDF_TEMPLATE: "RENDER_PDF_TEMPLATE",
     RENDER_EMAIL_TEMPLATE: "RENDER_EMAIL_TEMPLATE",
+    GET_FILE: "GET_FILE",
   };
 
   // =========================================================================
@@ -1602,6 +1604,331 @@ define(["N/config", "N/log", "N/query", "N/record", "N/render", "N/runtime", "N/
     }
   }
 
+  /**
+   * Standard NetSuite File Cabinet root folders (which have negative internal IDs in NetSuite).
+   */
+  const SYSTEM_ROOT_FOLDERS = {
+    "-15": { name: "SuiteScripts", parent: null },
+    "-16": { name: "SuiteBundles", parent: null },
+    "-10": { name: "Templates", parent: null },
+    "-11": { name: "Letter Templates", parent: -10 },
+    "-12": { name: "E-mail Templates", parent: -10 },
+    "-13": { name: "Fax Templates", parent: -10 },
+    "-14": { name: "Marketing Templates", parent: -10 },
+    "-100": { name: "Web Site Hosting Files", parent: null },
+    "-101": { name: "Live Hosting Files", parent: -100 },
+    "-102": { name: "Staging Hosting Files", parent: -100 },
+    "-6": { name: "Images", parent: null },
+    "-4": { name: "Attachments Received", parent: null },
+    "-5": { name: "Attachments Sent", parent: null },
+    "-9": { name: "SuiteApps", parent: null },
+  };
+
+  /**
+   * Resolves full File Cabinet paths (e.g. "/SuiteScripts/sub/foo.js") for an array of
+   * { id, name, folder } objects by walking mediaitemfolder parent links via SuiteQL.
+   *
+   * @param {Array<{ id: number, name: string, folder: number|null }>} fileEntries
+   * @returns {Object} Map of fileId -> resolved File Cabinet path
+   */
+  function resolveFileCabinetPathsByEntries(fileEntries) {
+    const resultMap = {};
+    if (!Array.isArray(fileEntries) || fileEntries.length === 0) {
+      return resultMap;
+    }
+
+    const folderMap = {};
+    for (const sysId of Object.keys(SYSTEM_ROOT_FOLDERS)) {
+      folderMap[Number(sysId)] = {
+        name: SYSTEM_ROOT_FOLDERS[sysId].name,
+        parent: SYSTEM_ROOT_FOLDERS[sysId].parent,
+      };
+    }
+
+    const foldersToFetch = {};
+    for (const entry of fileEntries) {
+      const folderId =
+        entry.folder != null && Number(entry.folder) !== 0 && !isNaN(Number(entry.folder))
+          ? Number(entry.folder)
+          : null;
+      if (folderId !== null && !folderMap[folderId]) {
+        foldersToFetch[folderId] = true;
+      }
+    }
+
+    let currentBatch = Object.keys(foldersToFetch).map(Number);
+    let depth = 0;
+
+    try {
+      while (currentBatch.length > 0 && depth < 12) {
+        depth++;
+        const folderRows = query
+          .runSuiteQL({
+            query: `SELECT id, name, parent FROM mediaitemfolder WHERE id IN (${currentBatch.join(", ")})`,
+          })
+          .asMappedResults();
+
+        const nextBatchMap = {};
+        if (Array.isArray(folderRows)) {
+          for (const fr of folderRows) {
+            const fId = Number(fr.id);
+            const fName = String(fr.name || "");
+            const fParent =
+              fr.parent != null && Number(fr.parent) !== 0 && !isNaN(Number(fr.parent))
+                ? Number(fr.parent)
+                : null;
+            folderMap[fId] = { name: fName, parent: fParent };
+            if (fParent !== null && !folderMap[fParent]) {
+              nextBatchMap[fParent] = true;
+            }
+          }
+        }
+        currentBatch = Object.keys(nextBatchMap).map(Number);
+      }
+    } catch {
+      // Ignore if mediaitemfolder is not accessible for the current role
+    }
+
+    for (const entry of fileEntries) {
+      const segments = [String(entry.name || "")];
+      let currFolder =
+        entry.folder != null && Number(entry.folder) !== 0 && !isNaN(Number(entry.folder))
+          ? Number(entry.folder)
+          : null;
+      let guard = 0;
+      while (currFolder !== null && folderMap[currFolder] && guard < 15) {
+        guard++;
+        const fNode = folderMap[currFolder];
+        segments.unshift(fNode.name);
+        currFolder = fNode.parent;
+      }
+      resultMap[Number(entry.id)] = "/" + segments.filter(Boolean).join("/");
+    }
+
+    return resultMap;
+  }
+
+  /**
+   * ACTION: GET_FILE
+   * Loads a file from the NetSuite File Cabinet by internal ID (`fileId`) or File Cabinet path / file name (`filePath`),
+   * returning file metadata and contents (plain text when `fileObj.isText` is true, or base64 when `fileObj.isText` is false).
+   *
+   * @param {Object} request
+   * @param {number|string} [request.fileId]
+   * @param {string} [request.filePath]
+   * @returns {Object}
+   */
+  function handleGetFile(request) {
+    const rawFileId =
+      request.fileId != null && String(request.fileId).trim() !== ""
+        ? String(request.fileId).trim()
+        : "";
+    let rawFilePath =
+      typeof request.filePath === "string" && request.filePath.trim() !== ""
+        ? request.filePath.trim()
+        : "";
+
+    if (!rawFileId && !rawFilePath) {
+      return makeErrorResponse('Either "fileId" or "filePath" is required to load a File Cabinet file.');
+    }
+
+    try {
+      const script = runtime.getCurrentScript();
+      const startGovernance = script.getRemainingUsage();
+      const timer = new ExecutionTimer();
+
+      let fileObj = null;
+      let loadError = null;
+
+      // 1. If a numeric fileId is provided (or filePath itself is purely numeric when fileId is omitted)
+      const numericIdStr =
+        rawFileId && /^\d+$/.test(rawFileId)
+          ? rawFileId
+          : !rawFileId && /^\d+$/.test(rawFilePath)
+            ? rawFilePath
+            : "";
+
+      if (numericIdStr) {
+        try {
+          fileObj = file.load({ id: Number(numericIdStr) });
+        } catch (err) {
+          return makeErrorResponse(
+            `Unable to load File Cabinet file with internal ID ${numericIdStr}: ${getErrorMessage(err)}`,
+          );
+        }
+      }
+
+      // 2. Otherwise, resolve by File Cabinet path or file name
+      if (!fileObj && rawFilePath) {
+        let cleanedPath = rawFilePath;
+        if (cleanedPath.startsWith("[") && cleanedPath.endsWith("]")) {
+          cleanedPath = cleanedPath.slice(1, -1).trim();
+        }
+        cleanedPath = cleanedPath.replace(/\\/g, "/").trim();
+
+        const pathNoLeadSlash = cleanedPath.replace(/^\/+/, "");
+        const pathWithLeadSlash = "/" + pathNoLeadSlash;
+
+        const pathCandidates = [pathNoLeadSlash, pathWithLeadSlash];
+
+        // If the path does not start with a top-level folder like SuiteScripts/, also try under SuiteScripts/
+        if (!/^suitescripts\//i.test(pathNoLeadSlash)) {
+          pathCandidates.push(`SuiteScripts/${pathNoLeadSlash}`);
+          pathCandidates.push(`/SuiteScripts/${pathNoLeadSlash}`);
+        }
+
+        const tried = {};
+        for (const candidate of pathCandidates) {
+          if (!candidate || tried[candidate]) continue;
+          tried[candidate] = true;
+          try {
+            fileObj = file.load({ id: candidate });
+            if (fileObj) break;
+          } catch (err) {
+            if (!loadError) loadError = err;
+          }
+        }
+
+        // 3. Fallback: Search by file name in SuiteQL `file` table and match folder path
+        if (!fileObj) {
+          const baseName = pathNoLeadSlash.split("/").pop() || "";
+          if (baseName) {
+            const escapedBaseName = baseName.replace(/'/g, "''");
+            let fileRows = [];
+            try {
+              fileRows = query
+                .runSuiteQL({
+                  query: `
+                    SELECT
+                      f.id AS id,
+                      f.name AS name,
+                      f.folder AS folder,
+                      f.filetype AS filetype,
+                      f.filesize AS filesize
+                    FROM
+                      file f
+                    WHERE
+                      LOWER(f.name) = LOWER('${escapedBaseName}')
+                    ORDER BY
+                      f.id ASC
+                  `,
+                })
+                .asMappedResults();
+            } catch {
+              fileRows = [];
+            }
+
+            if (Array.isArray(fileRows) && fileRows.length > 0) {
+              const pathMap = resolveFileCabinetPathsByEntries(fileRows);
+              const lowerTargetWithSlash = pathWithLeadSlash.toLowerCase();
+              const lowerTargetSuffix = "/" + pathNoLeadSlash.toLowerCase();
+
+              const candidates = fileRows.map((r) => {
+                const fId = Number(r.id);
+                return {
+                  fileId: fId,
+                  name: String(r.name || ""),
+                  folderId: r.folder != null ? Number(r.folder) : null,
+                  fileType: r.filetype != null ? String(r.filetype) : null,
+                  byteSize: r.filesize != null ? Number(r.filesize) : null,
+                  fileCabinetPath: pathMap[fId] || `/${r.name}`,
+                };
+              });
+
+              // Check exact full path match first, then suffix match (e.g. "sub/foo.js" matching "/SuiteScripts/sub/foo.js")
+              let matchedCandidates = candidates.filter(
+                (c) => c.fileCabinetPath.toLowerCase() === lowerTargetWithSlash,
+              );
+              if (matchedCandidates.length === 0) {
+                matchedCandidates = candidates.filter((c) =>
+                  c.fileCabinetPath.toLowerCase().endsWith(lowerTargetSuffix),
+                );
+              }
+              if (matchedCandidates.length === 0 && !pathNoLeadSlash.includes("/")) {
+                matchedCandidates = candidates;
+              }
+
+              if (matchedCandidates.length === 1) {
+                try {
+                  fileObj = file.load({ id: matchedCandidates[0].fileId });
+                } catch (err) {
+                  loadError = err;
+                }
+              } else if (matchedCandidates.length > 1) {
+                return {
+                  success: false,
+                  errorMessage: `Multiple files (${matchedCandidates.length}) matched "${rawFilePath}" in the File Cabinet. Please specify the exact "fileId" or full "fileCabinetPath".`,
+                  candidates: matchedCandidates,
+                };
+              }
+            }
+          }
+        }
+      }
+
+      if (!fileObj) {
+        const detail = loadError ? `: ${getErrorMessage(loadError)}` : "";
+        return makeErrorResponse(
+          `File "${rawFilePath || rawFileId}" was not found in the NetSuite File Cabinet${detail}`,
+        );
+      }
+
+      const fileId = Number(fileObj.id);
+      const fileName = String(fileObj.name || "");
+      const folderId =
+        fileObj.folder != null && !isNaN(Number(fileObj.folder))
+          ? Number(fileObj.folder)
+          : null;
+
+      // Resolve full canonical File Cabinet path
+      const resolvedPaths = resolveFileCabinetPathsByEntries([
+        { id: fileId, name: fileName, folder: folderId },
+      ]);
+      let fileCabinetPath = resolvedPaths[fileId] || "";
+      if (!fileCabinetPath || fileCabinetPath === `/${fileName}`) {
+        const rawObjPath = fileObj.path ? String(fileObj.path).replace(/\\/g, "/").trim() : "";
+        if (rawObjPath) {
+          fileCabinetPath = rawObjPath.startsWith("/") ? rawObjPath : `/${rawObjPath}`;
+        } else if (!fileCabinetPath) {
+          fileCabinetPath = `/${fileName}`;
+        }
+      }
+
+      let rawContents = "";
+      try {
+        rawContents = fileObj.getContents();
+      } catch (contentErr) {
+        return makeErrorResponse(
+          `Loaded metadata for "${fileCabinetPath}" (fileId: ${fileId}, size: ${fileObj.size} bytes), but failed to read file contents: ${getErrorMessage(contentErr)}`,
+        );
+      }
+
+      const timeElapsedMS = timer.elapsed;
+      const governanceUsed = startGovernance - script.getRemainingUsage();
+
+      return {
+        success: true,
+        fileId: fileId,
+        name: fileName,
+        folderId: folderId,
+        fileCabinetPath: fileCabinetPath,
+        fileType: fileObj.fileType != null ? String(fileObj.fileType) : null,
+        size: fileObj.size != null ? Number(fileObj.size) : null,
+        encoding: fileObj.encoding != null ? String(fileObj.encoding) : null,
+        description: fileObj.description != null ? String(fileObj.description) : null,
+        url: fileObj.url != null ? String(fileObj.url) : null,
+        isOnline: Boolean(fileObj.isOnline),
+        isInactive: Boolean(fileObj.isInactive),
+        rawIsText: Boolean(fileObj.isText),
+        contents: rawContents != null ? String(rawContents) : "",
+        timeElapsedMS: timeElapsedMS,
+        governanceUsed: governanceUsed,
+      };
+    } catch (e) {
+      return makeErrorResponse(`Unable to load File Cabinet file: ${getErrorMessage(e)}`);
+    }
+  }
+
   // =========================================================================
   // ACTION DISPATCHER
   // =========================================================================
@@ -1616,6 +1943,7 @@ define(["N/config", "N/log", "N/query", "N/record", "N/render", "N/runtime", "N/
     [MCP_ACTION.GET_TRANSLATIONS]: handleGetTranslations,
     [MCP_ACTION.RENDER_PDF_TEMPLATE]: handleRenderPdfTemplate,
     [MCP_ACTION.RENDER_EMAIL_TEMPLATE]: handleRenderEmailTemplate,
+    [MCP_ACTION.GET_FILE]: handleGetFile,
   };
 
   /**

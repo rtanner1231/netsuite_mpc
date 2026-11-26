@@ -4,6 +4,7 @@ import { getScriptLogsTool } from "./getScriptLogs.js";
 import { getRunFunctionLogsTool } from "./getRunFunctionLogs.js";
 import { uploadFileTool } from "./uploadFile.js";
 import { compareFilesTool } from "./compareFiles.js";
+import { viewFileTool } from "./viewFile.js";
 import { runFunctionTool } from "./runFunction.js";
 import { loadRecordSampleTool } from "./loadRecordSample.js";
 import { createRecordTool } from "./createRecord.js";
@@ -45,6 +46,7 @@ export const toolsRegistry = [
     getRunFunctionLogsTool,
     uploadFileTool,
     compareFilesTool,
+    viewFileTool,
     deployScriptTool,
     getScriptTool,
     searchScriptsTool,

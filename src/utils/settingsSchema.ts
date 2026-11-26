@@ -29,7 +29,7 @@ export const TOOL_CATEGORIES: ToolCategorySchema[] = [
     { id: "table_discovery", title: "Table & Schema Discovery" },
     { id: "data_operations", title: "Data Querying & Record Operations" },
     { id: "script_execution", title: "Script Execution & Log Inspection" },
-    { id: "sdf_file_deployment", title: "SDF File Deployment" },
+    { id: "sdf_file_deployment", title: "File Cabinet & SDF Files" },
     { id: "script_management", title: "Script Management" },
     { id: "custom_objects", title: "Custom Objects (Records & Lists)" },
     { id: "translations", title: "Translation Collections" },
@@ -54,7 +54,8 @@ export const TOOL_CATEGORY_BY_NAME: Record<string, string> = {
     netsuite_get_run_function_logs: "script_execution",
     netsuite_get_script_logs: "script_execution",
 
-    // 4. SDF File Deployment
+    // 4. File Cabinet & SDF Files
+    netsuite_view_file: "sdf_file_deployment",
     netsuite_upload_file: "sdf_file_deployment",
     netsuite_compare_files: "sdf_file_deployment",
 

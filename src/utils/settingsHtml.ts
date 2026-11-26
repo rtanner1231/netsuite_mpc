@@ -1346,7 +1346,7 @@ export const renderSettingsHtml = (token: string): string => {
                     { id: "table_discovery", title: "Table & Schema Discovery" },
                     { id: "data_operations", title: "Data Querying & Record Operations" },
                     { id: "script_execution", title: "Script Execution & Log Inspection" },
-                    { id: "sdf_file_deployment", title: "SDF File Deployment" },
+                    { id: "sdf_file_deployment", title: "File Cabinet & SDF Files" },
                     { id: "script_management", title: "Script Management" },
                     { id: "custom_objects", title: "Custom Objects (Records & Lists)" },
                     { id: "translations", title: "Translation Collections" },
@@ -1679,6 +1679,7 @@ export const renderSettingsHtml = (token: string): string => {
                     { id: "data_operations" },
                     { id: "script_execution" },
                     { id: "sdf_file_deployment" },
+                    { id: "script_management" },
                     { id: "custom_objects" },
                     { id: "translations" },
                     { id: "templates" }
