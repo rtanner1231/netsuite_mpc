@@ -58,7 +58,12 @@ export const TOOL_CATEGORIES: ToolCategorySchema[] = [
     {
         id: "data_operations",
         title: "Data Querying & Record Operations",
-        description: "Execute SuiteQL queries, load dynamic record samples, create or update NetSuite records, and build/preview/save NetSuite Saved Searches and SuiteAnalytics Datasets."
+        description: "Execute SuiteQL queries, load dynamic record samples, and create or update NetSuite records."
+    },
+    {
+        id: "report_creation",
+        title: "Report Creation (Saved Searches & Datasets)",
+        description: "Search, view, build, preview, and save or update NetSuite Saved Searches and SuiteAnalytics Datasets."
     },
     {
         id: "script_execution",
@@ -160,15 +165,13 @@ export const PROFILE_PRESETS: ProfilePresetSchema[] = [
         disabledTools: [
             ...DEFAULT_DISABLED_TOOLS,
             "netsuite_get_related_tables",
-            "netsuite_upsert_record",
-            "netsuite_create_saved_search",
-            "netsuite_create_dataset"
+            "netsuite_upsert_record"
         ]
     },
     {
         id: "all",
         title: "All Tool Categories",
-        description: "Enables all 8 tool categories at once (not recommended for smaller models or crowded agent contexts).",
+        description: "Enables all 9 tool categories at once (not recommended for smaller models or crowded agent contexts).",
         disableDestructive: false,
         disableSdf: false,
         allowDynamicActivation: true,
@@ -188,10 +191,14 @@ export const TOOL_CATEGORY_BY_NAME: Record<string, string> = {
     netsuite_run_suite_ql: "data_operations",
     netsuite_load_record_sample: "data_operations",
     netsuite_upsert_record: "data_operations",
-    netsuite_create_saved_search: "data_operations",
-    netsuite_create_dataset: "data_operations",
 
-    // 3. Script Execution & Log Inspection
+    // 3. Report Creation (Saved Searches & Datasets)
+    netsuite_view_saved_search: "report_creation",
+    netsuite_create_saved_search: "report_creation",
+    netsuite_view_dataset: "report_creation",
+    netsuite_create_dataset: "report_creation",
+
+    // 4. Script Execution & Log Inspection
     netsuite_run_function: "script_execution",
     netsuite_get_script_logs: "script_execution",
 

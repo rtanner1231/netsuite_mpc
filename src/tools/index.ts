@@ -7,7 +7,9 @@ import { viewFileTool } from "./viewFile.js";
 import { runFunctionTool } from "./runFunction.js";
 import { loadRecordSampleTool } from "./loadRecordSample.js";
 import { upsertRecordTool } from "./upsertRecord.js";
+import { viewSavedSearchTool } from "./viewSavedSearch.js";
 import { createSavedSearchTool } from "./createSavedSearch.js";
+import { viewDatasetTool } from "./viewDataset.js";
 import { createDatasetTool } from "./createDataset.js";
 import { createCustomRecordTool } from "./createCustomRecord.js";
 import { upsertCustomFieldTool } from "./upsertCustomField.js";
@@ -54,7 +56,9 @@ export const toolsRegistry: ToolDefinition[] = [
     runFunctionTool,
     loadRecordSampleTool,
     upsertRecordTool,
+    viewSavedSearchTool,
     createSavedSearchTool,
+    viewDatasetTool,
     createDatasetTool,
     createCustomRecordTool,
     updateCustomRecordTool,

@@ -35,7 +35,9 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
     RENDER_PDF_TEMPLATE: "RENDER_PDF_TEMPLATE",
     RENDER_EMAIL_TEMPLATE: "RENDER_EMAIL_TEMPLATE",
     GET_FILE: "GET_FILE",
+    VIEW_SAVED_SEARCH: "VIEW_SAVED_SEARCH",
     CREATE_SAVED_SEARCH: "CREATE_SAVED_SEARCH",
+    VIEW_DATASET: "VIEW_DATASET",
     CREATE_DATASET: "CREATE_DATASET",
   };
 
@@ -2564,7 +2566,9 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
         isPublic: resolvedIsPublic,
         totalMatchCount: totalMatchCount,
         previewRowCount: previewRows.length,
+        filters: serializeSearchFilters(searchObj.filters),
         appliedFilterExpression: searchObj.filterExpression || null,
+        settings: serializeSearchSettings(searchObj.settings),
         columns: columnMeta,
         previewRows: previewRows,
         timeElapsedMS: timeElapsedMS,
@@ -2573,6 +2577,369 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
     } catch (e) {
       return makeErrorResponse(
         `Unable to ${isDryRun ? "run search dry-run" : "save search"}: ${extractFieldsFromErrorMessage(getErrorMessage(e))}`,
+      );
+    }
+  }
+
+  /**
+   * Serializes an array of N/search.Filter objects into a clean array of structured filter definitions
+   * directly compatible with `netsuite_create_saved_search`.
+   *
+   * @param {Array<Object>|null} rawFilters
+   * @returns {Array<Object>}
+   */
+  function serializeSearchFilters(rawFilters) {
+    if (!Array.isArray(rawFilters) || rawFilters.length === 0) return [];
+    const serialized = [];
+    for (let i = 0; i < rawFilters.length; i++) {
+      const f = rawFilters[i];
+      if (!f || typeof f !== "object" || !f.name) continue;
+      const item = {
+        name: String(f.name),
+        operator: f.operator != null ? String(f.operator) : "",
+      };
+      if (f.join) {
+        item.join = String(f.join);
+      }
+      if (f.values !== undefined && f.values !== null) {
+        item.values = f.values;
+      }
+      if (f.formula) {
+        item.formula = String(f.formula);
+      }
+      if (f.summary) {
+        item.summary = String(f.summary);
+      }
+      serialized.push(item);
+    }
+    return serialized;
+  }
+
+  /**
+   * Serializes an array of N/search.Setting objects into `{ name, value }` pairs
+   * directly compatible with `netsuite_create_saved_search`.
+   *
+   * @param {Array<Object>|null} rawSettings
+   * @returns {Array<{ name: string, value: string }>}
+   */
+  function serializeSearchSettings(rawSettings) {
+    if (!Array.isArray(rawSettings) || rawSettings.length === 0) return [];
+    const serialized = [];
+    for (let i = 0; i < rawSettings.length; i++) {
+      const s = rawSettings[i];
+      if (!s || typeof s !== "object" || !s.name) continue;
+      serialized.push({
+        name: String(s.name),
+        value: s.value != null ? String(s.value) : "",
+      });
+    }
+    return serialized;
+  }
+
+  /**
+   * ACTION: VIEW_SAVED_SEARCH
+   * Two modes:
+   * 1. Inspect & Preview Mode (`scriptId` or `id` provided):
+   *    Loads an existing NetSuite Saved Search via N/search.load, returns its full definition
+   *    (searchType, title, scriptId, savedSearchId, isPublic, columns, filters, filterExpression, settings)
+   *    in a format ready to pass to `netsuite_create_saved_search` with `overwrite: true`,
+   *    and optionally executes a preview of the first `maxRows` rows (default 25; pass 0 for definition only).
+   * 2. Search / List Mode (`scriptId` and `id` omitted):
+   *    Searches existing saved searches in NetSuite (optionally filtered by `searchTerm` and/or `recordType`)
+   *    so an agent can discover the `scriptId` of a saved search by its title or record type.
+   *
+   * @param {Object} request
+   * @param {string|number} [request.scriptId]
+   * @param {string|number} [request.id]
+   * @param {string} [request.searchTerm]
+   * @param {string} [request.recordType]
+   * @param {string} [request.type]
+   * @param {number} [request.maxRows=25]
+   * @param {number} [request.limit=50]
+   * @returns {Object}
+   */
+  function handleViewSavedSearch(request) {
+    const rawIdInput =
+      request.scriptId != null && String(request.scriptId).trim() !== ""
+        ? String(request.scriptId).trim()
+        : request.id != null && String(request.id).trim() !== ""
+          ? String(request.id).trim()
+          : "";
+    const normalizedScriptId = normalizeSearchScriptId(rawIdInput);
+    const recordType =
+      typeof request.recordType === "string" && request.recordType.trim()
+        ? request.recordType.trim()
+        : typeof request.type === "string" && request.type.trim()
+          ? request.type.trim()
+          : "";
+    const searchTerm =
+      typeof request.searchTerm === "string" && request.searchTerm.trim()
+        ? request.searchTerm.trim()
+        : "";
+
+    try {
+      const script = runtime.getCurrentScript();
+      const startGovernance = script.getRemainingUsage();
+      const timer = new ExecutionTimer();
+
+      // Mode 2: Search / List saved searches when scriptId is omitted
+      if (!normalizedScriptId) {
+        const rawLimit = request.limit != null ? Number(request.limit) : 50;
+        const limit = !isNaN(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 50;
+
+        const filterExpr = [];
+        if (searchTerm) {
+          filterExpr.push([
+            ["title", "contains", searchTerm],
+            "OR",
+            ["id", "contains", searchTerm],
+          ]);
+        }
+        if (recordType) {
+          if (filterExpr.length > 0) filterExpr.push("AND");
+          filterExpr.push(["recordtype", "is", recordType]);
+        }
+
+        const colInternalId = search.createColumn({ name: "internalid", sort: search.Sort.DESC });
+        const colScriptId = search.createColumn({ name: "id" });
+        const colTitle = search.createColumn({ name: "title" });
+        const colRecordType = search.createColumn({ name: "recordtype" });
+        const colOwner = search.createColumn({ name: "owner" });
+        const colIsPublic = search.createColumn({ name: "public" });
+
+        let listSearchObj;
+        try {
+          listSearchObj = search.create({
+            type: "savedsearch",
+            ...(filterExpr.length > 0 ? { filters: filterExpr } : {}),
+            columns: [colInternalId, colScriptId, colTitle, colRecordType, colOwner, colIsPublic],
+          });
+        } catch (createListErr) {
+          return makeErrorResponse(
+            `Unable to search saved searches: ${extractFieldsFromErrorMessage(getErrorMessage(createListErr))}`,
+          );
+        }
+
+        let results = [];
+        try {
+          results = listSearchObj.run().getRange({ start: 0, end: limit }) || [];
+        } catch (runListErr) {
+          // If recordtype filter failed due to internal casing/enum differences, retry with in-memory recordType filtering
+          if (recordType) {
+            try {
+              const fallbackSearch = search.create({
+                type: "savedsearch",
+                ...(searchTerm
+                  ? {
+                      filters: [
+                        ["title", "contains", searchTerm],
+                        "OR",
+                        ["id", "contains", searchTerm],
+                      ],
+                    }
+                  : {}),
+                columns: [colInternalId, colScriptId, colTitle, colRecordType, colOwner, colIsPublic],
+              });
+              const rawFallback = fallbackSearch.run().getRange({ start: 0, end: Math.min(limit * 4, 1000) }) || [];
+              const lowerRecType = recordType.toLowerCase();
+              results = rawFallback
+                .filter((r) => {
+                  const rtVal = String(r.getValue(colRecordType) || "").toLowerCase();
+                  const rtTxt = String(r.getText(colRecordType) || "").toLowerCase();
+                  return rtVal === lowerRecType || rtTxt === lowerRecType || rtVal.includes(lowerRecType) || rtTxt.includes(lowerRecType);
+                })
+                .slice(0, limit);
+            } catch {
+              return makeErrorResponse(
+                `Unable to list saved searches: ${extractFieldsFromErrorMessage(getErrorMessage(runListErr))}`,
+              );
+            }
+          } else {
+            return makeErrorResponse(
+              `Unable to list saved searches: ${extractFieldsFromErrorMessage(getErrorMessage(runListErr))}`,
+            );
+          }
+        }
+
+        const savedSearches = results.map((r) => {
+          const internalId = r.getValue(colInternalId) || r.id || null;
+          const sId = r.getValue(colScriptId) || null;
+          const sTitle = r.getValue(colTitle) || null;
+          const recTypeVal = r.getValue(colRecordType) || null;
+          const recTypeText = r.getText(colRecordType) || null;
+          const ownerText = r.getText(colOwner) || r.getValue(colOwner) || null;
+          const pubVal = r.getValue(colIsPublic);
+          const isPub = pubVal === true || pubVal === "T";
+
+          return {
+            ...(internalId != null ? { savedSearchId: internalId } : {}),
+            scriptId: sId,
+            title: sTitle,
+            recordType: recTypeVal,
+            ...(recTypeText && recTypeText !== recTypeVal ? { recordTypeLabel: recTypeText } : {}),
+            isPublic: isPub,
+            ...(ownerText ? { owner: ownerText } : {}),
+            ...(internalId != null
+              ? { searchResultsUrl: `/app/common/search/searchresults.nl?searchid=${internalId}` }
+              : {}),
+          };
+        });
+
+        const timeElapsedMS = timer.elapsed;
+        const governanceUsed = startGovernance - script.getRemainingUsage();
+
+        return {
+          success: true,
+          mode: "list",
+          ...(searchTerm ? { searchTerm: searchTerm } : {}),
+          ...(recordType ? { recordType: recordType } : {}),
+          count: savedSearches.length,
+          savedSearches: savedSearches,
+          timeElapsedMS: timeElapsedMS,
+          governanceUsed: governanceUsed,
+        };
+      }
+
+      // Mode 1: Inspect & Preview a specific saved search by scriptId / internal ID
+      const rawMaxRows = request.maxRows != null ? Number(request.maxRows) : 25;
+      const maxRows = !isNaN(rawMaxRows) && rawMaxRows >= 0 ? Math.min(Math.floor(rawMaxRows), 1000) : 25;
+
+      let searchObj = null;
+      try {
+        searchObj = search.load({
+          id: normalizedScriptId,
+          ...(recordType ? { type: recordType } : {}),
+        });
+      } catch (loadErr) {
+        return makeErrorResponse(
+          `Unable to load saved search "${normalizedScriptId}": ${extractFieldsFromErrorMessage(getErrorMessage(loadErr))}`,
+        );
+      }
+
+      const activeColumns = Array.isArray(searchObj.columns) ? searchObj.columns : [];
+      const usedKeys = {};
+      const columnMeta = activeColumns.map((col, idx) => {
+        const key = buildPreviewColumnKey(col, idx, usedKeys);
+        const item = {
+          key: key,
+          name: col.name,
+        };
+        if (col.join) item.join = col.join;
+        if (col.summary) item.summary = col.summary;
+        if (col.formula) item.formula = col.formula;
+        if (col.label) item.label = col.label;
+        if (col.sort && String(col.sort).toUpperCase() !== "NONE") item.sort = col.sort;
+        if (col.function) item.function = col.function;
+        return item;
+      });
+
+      const structuredFilters = serializeSearchFilters(searchObj.filters);
+      const structuredSettings = serializeSearchSettings(searchObj.settings);
+      const filterExpr = searchObj.filterExpression || null;
+
+      let totalMatchCount = null;
+      const previewRows = [];
+
+      if (maxRows > 0) {
+        try {
+          const pagedData = searchObj.runPaged({ pageSize: Math.max(50, Math.min(maxRows || 50, 1000)) });
+          totalMatchCount = typeof pagedData.count === "number" ? pagedData.count : null;
+        } catch {
+          totalMatchCount = null;
+        }
+
+        let rawResults = [];
+        try {
+          rawResults = searchObj.run().getRange({ start: 0, end: maxRows }) || [];
+        } catch (runErr) {
+          return makeErrorResponse(
+            `Loaded saved search "${normalizedScriptId}", but preview execution failed: ${extractFieldsFromErrorMessage(getErrorMessage(runErr))}`,
+          );
+        }
+
+        for (let rIdx = 0; rIdx < rawResults.length; rIdx++) {
+          const res = rawResults[rIdx];
+          const rowValues = {};
+
+          for (let cIdx = 0; cIdx < activeColumns.length; cIdx++) {
+            const col = activeColumns[cIdx];
+            const colKey = columnMeta[cIdx].key;
+            let val = null;
+            let txt = null;
+
+            try {
+              val = res.getValue(col);
+            } catch {
+              val = null;
+            }
+            try {
+              txt = res.getText(col);
+            } catch {
+              txt = null;
+            }
+
+            if (txt != null && txt !== "" && String(txt) !== String(val)) {
+              rowValues[colKey] = {
+                value: val,
+                text: txt,
+              };
+            } else {
+              rowValues[colKey] = val;
+            }
+          }
+
+          previewRows.push({
+            ...(res.id != null ? { id: res.id } : {}),
+            ...(res.recordType != null ? { recordType: res.recordType } : {}),
+            values: rowValues,
+          });
+        }
+      }
+
+      const resolvedSavedSearchId =
+        searchObj.searchId != null
+          ? searchObj.searchId
+          : /^\d+$/.test(normalizedScriptId)
+            ? Number(normalizedScriptId)
+            : null;
+      const resolvedScriptId =
+        searchObj.id != null ? String(searchObj.id) : normalizedScriptId;
+      const resolvedTitle = searchObj.title ? String(searchObj.title) : null;
+      const resolvedIsPublic = Boolean(searchObj.isPublic);
+
+      const timeElapsedMS = timer.elapsed;
+      const governanceUsed = startGovernance - script.getRemainingUsage();
+
+      return {
+        success: true,
+        mode: "view",
+        searchType: searchObj.searchType || recordType || null,
+        ...(resolvedSavedSearchId != null
+          ? {
+              savedSearchId: resolvedSavedSearchId,
+              searchResultsUrl: `/app/common/search/searchresults.nl?searchid=${resolvedSavedSearchId}`,
+            }
+          : {}),
+        scriptId: resolvedScriptId,
+        title: resolvedTitle,
+        isPublic: resolvedIsPublic,
+        columns: columnMeta,
+        filters: structuredFilters,
+        filterExpression: filterExpr,
+        settings: structuredSettings,
+        ...(maxRows > 0
+          ? {
+              totalMatchCount: totalMatchCount,
+              previewRowCount: previewRows.length,
+              previewRows: previewRows,
+            }
+          : {}),
+        timeElapsedMS: timeElapsedMS,
+        governanceUsed: governanceUsed,
+      };
+    } catch (e) {
+      return makeErrorResponse(
+        `Unable to view saved search: ${extractFieldsFromErrorMessage(getErrorMessage(e))}`,
       );
     }
   }
@@ -4493,6 +4860,296 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
     }
   }
 
+  /**
+   * ACTION: VIEW_DATASET
+   * Two modes:
+   * 1. Inspect & Preview Mode (`scriptId` or `id` provided):
+   *    Loads an existing NetSuite SuiteAnalytics Dataset via N/dataset.load, returns its full definition
+   *    (datasetType, name, description, scriptId, datasetUrl, columns, condition, generatedSuiteQL)
+   *    in a format ready to pass to `netsuite_create_dataset` with `overwrite: true`,
+   *    and optionally executes a preview of the first `maxRows` rows (default 25; pass 0 for definition only).
+   * 2. Search / List Mode (`scriptId` and `id` omitted):
+   *    Lists existing SuiteAnalytics Datasets via `dataset.list()` (optionally filtered by `searchTerm`
+   *    against `name`, `scriptId`, or `description`) so an agent can discover the `scriptId` of a dataset by name.
+   *
+   * @param {Object} request
+   * @param {string|number} [request.scriptId]
+   * @param {string|number} [request.id]
+   * @param {string} [request.searchTerm]
+   * @param {number} [request.maxRows=25]
+   * @param {number} [request.limit=50]
+   * @returns {Object}
+   */
+  function handleViewDataset(request) {
+    const rawIdInput =
+      request.scriptId != null && String(request.scriptId).trim() !== ""
+        ? String(request.scriptId).trim()
+        : request.id != null && String(request.id).trim() !== ""
+          ? String(request.id).trim()
+          : "";
+    const normalizedScriptId = normalizeDatasetScriptId(rawIdInput);
+    const searchTerm =
+      typeof request.searchTerm === "string" && request.searchTerm.trim()
+        ? request.searchTerm.trim()
+        : "";
+
+    try {
+      const script = runtime.getCurrentScript();
+      const startGovernance = script.getRemainingUsage();
+      const timer = new ExecutionTimer();
+
+      // Mode 2: Search / List datasets when scriptId is omitted
+      if (!normalizedScriptId) {
+        const rawLimit = request.limit != null ? Number(request.limit) : 50;
+        const limit = !isNaN(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 50;
+
+        let rawList = [];
+        try {
+          if (typeof dataset.list === "function") {
+            rawList = dataset.list() || [];
+          }
+        } catch (listErr) {
+          return makeErrorResponse(
+            `Unable to list datasets: ${extractFieldsFromErrorMessage(getErrorMessage(listErr))}`,
+          );
+        }
+
+        const lowerTerm = searchTerm.toLowerCase();
+        const allItems = [];
+        for (let i = 0; i < rawList.length; i++) {
+          const item = rawList[i];
+          if (!item || typeof item !== "object") continue;
+          const sId =
+            item.scriptId != null
+              ? String(item.scriptId).trim()
+              : item.id != null
+                ? String(item.id).trim()
+                : "";
+          const name = item.name != null ? String(item.name).trim() : null;
+          const description =
+            item.description != null && String(item.description) !== ""
+              ? String(item.description)
+              : null;
+
+          if (lowerTerm) {
+            const matchId = sId.toLowerCase().includes(lowerTerm);
+            const matchName = name ? name.toLowerCase().includes(lowerTerm) : false;
+            const matchDesc = description ? description.toLowerCase().includes(lowerTerm) : false;
+            if (!matchId && !matchName && !matchDesc) {
+              continue;
+            }
+          }
+
+          allItems.push({
+            scriptId: sId || null,
+            name: name,
+            ...(description !== null ? { description: description } : {}),
+            ...(sId ? { datasetUrl: `/app/Workbook/Dataset.nl?id=${sId}` } : {}),
+          });
+        }
+
+        const pagedDatasets = allItems.slice(0, limit);
+        const timeElapsedMS = timer.elapsed;
+        const governanceUsed = startGovernance - script.getRemainingUsage();
+
+        return {
+          success: true,
+          mode: "list",
+          ...(searchTerm ? { searchTerm: searchTerm } : {}),
+          totalMatchingCount: allItems.length,
+          count: pagedDatasets.length,
+          datasets: pagedDatasets,
+          timeElapsedMS: timeElapsedMS,
+          governanceUsed: governanceUsed,
+        };
+      }
+
+      // Mode 1: Inspect & Preview a specific dataset by scriptId
+      const rawMaxRows = request.maxRows != null ? Number(request.maxRows) : 25;
+      const maxRows = !isNaN(rawMaxRows) && rawMaxRows >= 0 ? Math.min(Math.floor(rawMaxRows), 1000) : 25;
+
+      let datasetObj = null;
+      try {
+        datasetObj = dataset.load({ id: normalizedScriptId });
+      } catch (loadErr) {
+        return makeErrorResponse(
+          `Unable to load dataset "${normalizedScriptId}": ${extractFieldsFromErrorMessage(getErrorMessage(loadErr))}`,
+        );
+      }
+
+      const existingMeta = lookupExistingDatasetMetadata(normalizedScriptId);
+      const resolvedName =
+        existingMeta.name ||
+        (datasetObj.name && String(datasetObj.name) !== "SuiteScript dataset"
+          ? String(datasetObj.name)
+          : datasetObj.name
+            ? String(datasetObj.name)
+            : null);
+      const resolvedDescription =
+        existingMeta.description !== null
+          ? existingMeta.description
+          : datasetObj.description != null && String(datasetObj.description) !== ""
+            ? String(datasetObj.description)
+            : null;
+      const resolvedScriptId =
+        datasetObj.id != null ? String(datasetObj.id) : normalizedScriptId;
+      const effectiveType = datasetObj.type ? String(datasetObj.type) : null;
+
+      const activeColumns = Array.isArray(datasetObj.columns) ? datasetObj.columns : [];
+      const usedPreviewKeys = {};
+      const columnMeta = activeColumns.map((col, idx) => {
+        const joinHops = col.join ? extractHopsFromDatasetJoin(col.join) : [];
+        const joinPath = formatDatasetJoinPath(joinHops);
+        const metaItem = {
+          key: "",
+          fieldId: col.fieldId || null,
+          alias: col.alias || null,
+          label: col.label || null,
+          ...(joinHops.length > 0 ? { join: joinHops, joinPath: joinPath } : {}),
+          ...(col.formula ? { formula: col.formula, type: col.type || null } : {}),
+        };
+        metaItem.key = buildDatasetPreviewColumnKey(metaItem, idx, usedPreviewKeys);
+        return metaItem;
+      });
+
+      const serializedCond = serializeDatasetCondition(datasetObj.condition || null);
+      const suiteQlInfo = tryGenerateDatasetSuiteQL(datasetObj, resolvedScriptId, true);
+
+      let totalMatchCount = null;
+      const previewRows = [];
+
+      if (maxRows > 0) {
+        const executeRunnableForPreview = (runnable) => {
+          let count = null;
+          let items = [];
+          let pData = null;
+          const pageSize = Math.max(5, Math.min(maxRows > 0 ? maxRows : 50, 1000));
+
+          try {
+            pData = runnable.runPaged({ pageSize: pageSize });
+            count = typeof pData.count === "number" ? pData.count : null;
+          } catch {
+            pData = null;
+          }
+
+          if (pData && Array.isArray(pData.pageRanges) && pData.pageRanges.length > 0) {
+            for (let pIdx = 0; pIdx < pData.pageRanges.length && items.length < maxRows; pIdx++) {
+              const pageRange = pData.pageRanges[pIdx];
+              const pageIndex = pageRange && pageRange.index != null ? pageRange.index : pIdx;
+              const page = pData.fetch({ index: pageIndex });
+              const pageResults = page && page.data && Array.isArray(page.data.results) ? page.data.results : [];
+              for (let rIdx = 0; rIdx < pageResults.length && items.length < maxRows; rIdx++) {
+                items.push(pageResults[rIdx]);
+              }
+            }
+          } else if (count !== 0) {
+            const resultSet = runnable.run();
+            const allResults = resultSet && Array.isArray(resultSet.results) ? resultSet.results : [];
+            if (count === null) {
+              count = allResults.length;
+            }
+            items = allResults.slice(0, maxRows);
+          }
+
+          return { count: count, items: items };
+        };
+
+        let rawResultItems = [];
+        let previewError = null;
+
+        try {
+          const dsExec = executeRunnableForPreview(datasetObj);
+          totalMatchCount = dsExec.count;
+          rawResultItems = dsExec.items;
+        } catch (dsErr) {
+          previewError = dsErr;
+        }
+
+        // Automatic N/query fallback for multi-hop joins
+        if (previewError) {
+          try {
+            const mirrorQuery = buildMirrorQueryFromDataset(datasetObj);
+            const qExec = executeRunnableForPreview(mirrorQuery);
+            totalMatchCount = qExec.count;
+            rawResultItems = qExec.items;
+            previewError = null;
+          } catch (qErr) {
+            previewError = qErr;
+          }
+        }
+
+        if (previewError) {
+          return makeErrorResponse(
+            `Loaded dataset "${resolvedScriptId}", but preview execution failed: ${extractFieldsFromErrorMessage(getErrorMessage(previewError))}`,
+          );
+        }
+
+        for (let rIdx = 0; rIdx < rawResultItems.length; rIdx++) {
+          const res = rawResultItems[rIdx];
+          const valsArray = res && Array.isArray(res.values) ? res.values : [];
+          let mappedObj = null;
+          try {
+            if (res && typeof res.asMap === "function") {
+              mappedObj = res.asMap();
+            }
+          } catch {
+            mappedObj = null;
+          }
+
+          const rowValues = {};
+          for (let cIdx = 0; cIdx < columnMeta.length; cIdx++) {
+            const cMeta = columnMeta[cIdx];
+            const colKey = cMeta.key;
+            let cellVal = cIdx < valsArray.length ? valsArray[cIdx] : null;
+            if (
+              cellVal === undefined &&
+              mappedObj &&
+              cMeta.alias &&
+              Object.prototype.hasOwnProperty.call(mappedObj, cMeta.alias)
+            ) {
+              cellVal = mappedObj[cMeta.alias];
+            }
+            rowValues[colKey] = cellVal !== undefined ? cellVal : null;
+          }
+
+          previewRows.push(rowValues);
+        }
+      }
+
+      const timeElapsedMS = timer.elapsed;
+      const governanceUsed = startGovernance - script.getRemainingUsage();
+
+      return {
+        success: true,
+        mode: "view",
+        datasetType: effectiveType,
+        scriptId: resolvedScriptId,
+        datasetUrl: `/app/Workbook/Dataset.nl?id=${resolvedScriptId}`,
+        ...(resolvedName ? { name: resolvedName } : {}),
+        ...(resolvedDescription !== null && resolvedDescription !== undefined
+          ? { description: resolvedDescription }
+          : {}),
+        columns: columnMeta,
+        condition: serializedCond,
+        ...(suiteQlInfo.query ? { generatedSuiteQL: suiteQlInfo.query } : {}),
+        ...(suiteQlInfo.params ? { generatedSuiteQLParams: suiteQlInfo.params } : {}),
+        ...(maxRows > 0
+          ? {
+              totalMatchCount: totalMatchCount,
+              previewRowCount: previewRows.length,
+              previewRows: previewRows,
+            }
+          : {}),
+        timeElapsedMS: timeElapsedMS,
+        governanceUsed: governanceUsed,
+      };
+    } catch (e) {
+      return makeErrorResponse(
+        `Unable to view dataset: ${extractFieldsFromErrorMessage(getErrorMessage(e))}`,
+      );
+    }
+  }
+
   // =========================================================================
   // ACTION DISPATCHER
   // =========================================================================
@@ -4508,7 +5165,9 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
     [MCP_ACTION.RENDER_PDF_TEMPLATE]: handleRenderPdfTemplate,
     [MCP_ACTION.RENDER_EMAIL_TEMPLATE]: handleRenderEmailTemplate,
     [MCP_ACTION.GET_FILE]: handleGetFile,
+    [MCP_ACTION.VIEW_SAVED_SEARCH]: handleViewSavedSearch,
     [MCP_ACTION.CREATE_SAVED_SEARCH]: handleCreateSavedSearch,
+    [MCP_ACTION.VIEW_DATASET]: handleViewDataset,
     [MCP_ACTION.CREATE_DATASET]: handleCreateDataset,
   };
 

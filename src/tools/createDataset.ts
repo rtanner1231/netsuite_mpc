@@ -183,10 +183,10 @@ export const createDatasetTool: ToolDefinition = {
     description:
         "Builds, dry-runs (previews), and saves or updates a NetSuite SuiteAnalytics Dataset (`custdataset_*`) via the N/dataset and N/query modules in the MCP RESTlet, and returns the total match count, preview rows, and NetSuite-generated SuiteQL query.\n\n" +
         "RECOMMENDED WORKFLOW:\n" +
-        "1. Always execute with `dryRun: true` (the default) first to test the dataset definition, verify all record types, joins, field IDs, and formulas, and inspect the `totalMatchCount`, `previewRows`, and `generatedSuiteQL`.\n" +
-        "2. Present the sample preview rows, criteria, and generated SuiteQL to the user for approval.\n" +
-        "3. Once approved, call this tool again with `dryRun: false` and `name` (plus optional `scriptId`, `description`, and `overwrite: true` if updating an existing dataset).\n" +
-        "4. Tip (Inspecting an existing dataset): To inspect and preview an existing saved dataset in NetSuite without modifying it, call this tool with `scriptId: 'custdataset_...'`, `overwrite: true`, and `dryRun: true` while omitting `columns` and `filters`.\n\n" +
+        "1. When updating an existing dataset in a new session, call `netsuite_view_dataset` first (either with `searchTerm` to find its `scriptId`, then with `scriptId`) to inspect its current `columns`, `condition`, and `generatedSuiteQL` before modifying them.\n" +
+        "2. Always execute `netsuite_create_dataset` with `dryRun: true` (the default) first to test the dataset definition, verify all record types, joins, field IDs, and formulas, and inspect the `totalMatchCount`, `previewRows`, and `generatedSuiteQL`.\n" +
+        "3. Present the sample preview rows, criteria, and generated SuiteQL to the user for approval.\n" +
+        "4. Once approved, call this tool again with `dryRun: false` and `name` (plus optional `scriptId`, `description`, and `overwrite: true` if updating an existing dataset).\n\n" +
         "IMPORTANT SCHEMA GUIDANCE (1-to-1 Match with Local Schema Tools!):\n" +
         "- Unlike `netsuite_create_saved_search` (which uses the legacy N/search schema), `netsuite_create_dataset` uses NetSuite's SuiteAnalytics / Records Catalog data source—the EXACT same schema stored in your local SQLite database! Always use `netsuite_search_tables`, `netsuite_get_fields`, and `netsuite_get_related_tables` to discover exact table IDs, field IDs, and join relationships for datasets.\n" +
         "- How Joins Work in N/dataset (`join` property on columns and filters):\n" +
@@ -201,7 +201,7 @@ export const createDatasetTool: ToolDefinition = {
     meta: {
         isDestructive: true,
         requiresSdf: false,
-        category: "data_operations"
+        category: "report_creation"
     },
     inputSchema: {
         type: "object",

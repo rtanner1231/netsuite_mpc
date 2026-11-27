@@ -1941,6 +1941,7 @@ export const renderSettingsHtml = (token: string): string => {
                 : [
                     { id: "table_discovery", title: "Table & Schema Discovery", description: "" },
                     { id: "data_operations", title: "Data Querying & Record Operations", description: "" },
+                    { id: "report_creation", title: "Report Creation (Saved Searches & Datasets)", description: "" },
                     { id: "script_execution", title: "Script Execution & Log Inspection", description: "" },
                     { id: "sdf_file_deployment", title: "File Cabinet & SDF Files", description: "" },
                     { id: "script_management", title: "Script Management", description: "" },

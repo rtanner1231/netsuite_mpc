@@ -44,9 +44,10 @@ export const createSavedSearchTool: ToolDefinition = {
     description:
         "Builds, dry-runs (previews), and saves or updates a NetSuite Saved Search via the N/search module in the MCP RESTlet.\n\n" +
         "RECOMMENDED WORKFLOW:\n" +
-        "1. Always execute with `dryRun: true` (the default) first to test the search definition, verify that all column/filter field IDs are valid in N/search, and retrieve the total match count and first `maxRows` preview rows.\n" +
-        "2. Present the sample preview rows and search criteria to the user for approval.\n" +
-        "3. Once approved, call this tool again with `dryRun: false` and `title` (plus optional `scriptId`, `isPublic`, and `overwrite: true` if updating an existing saved search).\n\n" +
+        "1. When updating an existing saved search in a new session, call `netsuite_view_saved_search` first (either with `searchTerm` to find its `scriptId`, then with `scriptId`) to inspect its current `columns`, `filters`/`filterExpression`, and `settings` before modifying them.\n" +
+        "2. Always execute `netsuite_create_saved_search` with `dryRun: true` (the default) first to test the search definition, verify that all column/filter field IDs are valid in N/search, and retrieve the total match count and first `maxRows` preview rows.\n" +
+        "3. Present the sample preview rows and search criteria to the user for approval.\n" +
+        "4. Once approved, call this tool again with `dryRun: false` and `title` (plus optional `scriptId`, `isPublic`, and `overwrite: true` if updating an existing saved search).\n\n" +
         "IMPORTANT SCHEMA GUIDANCE (SuiteQL vs. N/search):\n" +
         "- Custom Records & Custom Fields: Use `netsuite_search_tables` and `netsuite_get_fields` to discover custom record types (`customrecord_*`) and custom field IDs (`custbody_*`, `custcol_*`, `custentity_*`, `custitem_*`, `custrecord_*`). These script IDs are identical in SuiteQL and N/search.\n" +
         "- Native Tables & Native Fields: Note that `netsuite_get_fields` reflects the SuiteQL/Analytics schema, which differs in several places from the N/search (Records Browser) schema. For native record types, fields, and joins, rely on your knowledge of NetSuite's N/search Records Browser (or use `netsuite_load_record_sample` to inspect native record field IDs):\n" +
@@ -56,7 +57,7 @@ export const createSavedSearchTool: ToolDefinition = {
     meta: {
         isDestructive: true,
         requiresSdf: false,
-        category: "data_operations"
+        category: "report_creation"
     },
     inputSchema: {
         type: "object",

@@ -30,7 +30,7 @@ export const buildManageToolsetsDescription = (
 ): string => {
     const baseIntro =
         "Temporarily activates, deactivates, resets, or lists NetSuite tool categories (toolsets) or specific individual tools for the current MCP session without modifying env.json. " +
-        "Use this tool whenever the user asks to perform a NetSuite task (such as viewing a file, managing scripts, custom records/lists, translations, or PDF/email templates) whose tools are not currently loaded in your tool list. " +
+        "Use this tool whenever the user asks to perform a NetSuite task (such as viewing/creating saved searches or datasets, viewing a file, managing scripts, custom records/lists, translations, or PDF/email templates) whose tools are not currently loaded in your tool list. " +
         "Tip: Pass specific 'tools' (e.g., tools: ['netsuite_view_file']) when you only need 1-2 tools to keep context lean, or 'categories' when you need an entire category workflow.";
 
     if (!config || !environment) {
