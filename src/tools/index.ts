@@ -8,6 +8,7 @@ import { runFunctionTool } from "./runFunction.js";
 import { loadRecordSampleTool } from "./loadRecordSample.js";
 import { upsertRecordTool } from "./upsertRecord.js";
 import { createSavedSearchTool } from "./createSavedSearch.js";
+import { createDatasetTool } from "./createDataset.js";
 import { createCustomRecordTool } from "./createCustomRecord.js";
 import { upsertCustomFieldTool } from "./upsertCustomField.js";
 import { upsertCustomListTool } from "./upsertCustomList.js";
@@ -54,6 +55,7 @@ export const toolsRegistry: ToolDefinition[] = [
     loadRecordSampleTool,
     upsertRecordTool,
     createSavedSearchTool,
+    createDatasetTool,
     createCustomRecordTool,
     updateCustomRecordTool,
     upsertCustomFieldTool,

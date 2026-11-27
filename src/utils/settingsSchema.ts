@@ -58,7 +58,7 @@ export const TOOL_CATEGORIES: ToolCategorySchema[] = [
     {
         id: "data_operations",
         title: "Data Querying & Record Operations",
-        description: "Execute SuiteQL queries, load dynamic record samples, create or update NetSuite records, and build/preview/save NetSuite Saved Searches."
+        description: "Execute SuiteQL queries, load dynamic record samples, create or update NetSuite records, and build/preview/save NetSuite Saved Searches and SuiteAnalytics Datasets."
     },
     {
         id: "script_execution",
@@ -161,7 +161,8 @@ export const PROFILE_PRESETS: ProfilePresetSchema[] = [
             ...DEFAULT_DISABLED_TOOLS,
             "netsuite_get_related_tables",
             "netsuite_upsert_record",
-            "netsuite_create_saved_search"
+            "netsuite_create_saved_search",
+            "netsuite_create_dataset"
         ]
     },
     {
@@ -188,6 +189,7 @@ export const TOOL_CATEGORY_BY_NAME: Record<string, string> = {
     netsuite_load_record_sample: "data_operations",
     netsuite_upsert_record: "data_operations",
     netsuite_create_saved_search: "data_operations",
+    netsuite_create_dataset: "data_operations",
 
     // 3. Script Execution & Log Inspection
     netsuite_run_function: "script_execution",

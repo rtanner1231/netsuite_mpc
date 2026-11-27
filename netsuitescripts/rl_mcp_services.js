@@ -7,9 +7,11 @@
  * Provides endpoints for executing SuiteQL queries, retrieving script execution logs,
  * dynamically running SuiteScript functions, and inspecting record samples.
  */
-define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/runtime", "N/search", "N/translation"], (
+define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/record", "N/render", "N/runtime", "N/search", "N/translation"], (
   config,
+  dataset,
   file,
+  format,
   log,
   query,
   record,
@@ -34,6 +36,7 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
     RENDER_EMAIL_TEMPLATE: "RENDER_EMAIL_TEMPLATE",
     GET_FILE: "GET_FILE",
     CREATE_SAVED_SEARCH: "CREATE_SAVED_SEARCH",
+    CREATE_DATASET: "CREATE_DATASET",
   };
 
   // =========================================================================
@@ -2574,6 +2577,1922 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
     }
   }
 
+  /**
+   * Normalizes a custom dataset script ID so that non-numeric IDs always start with "custdataset".
+   * Preserves both custom underscore-prefixed IDs ("custdataset_foo") and NetSuite auto-generated
+   * dataset IDs ("custdataset65").
+   *
+   * @param {string|number|null} rawId
+   * @returns {string|null}
+   */
+  function normalizeDatasetScriptId(rawId) {
+    if (rawId == null) return null;
+    const trimmed = String(rawId).trim();
+    if (!trimmed) return null;
+    if (/^\d+$/.test(trimmed)) {
+      return trimmed;
+    }
+    const lower = trimmed.toLowerCase();
+    if (lower.startsWith("custdataset")) {
+      return lower;
+    }
+    if (lower.startsWith("customdataset_")) {
+      return `custdataset_${lower.slice("customdataset_".length).replace(/^_+/, "")}`;
+    }
+    if (lower.startsWith("customdataset")) {
+      return `custdataset_${lower.slice("customdataset".length).replace(/^_+/, "")}`;
+    }
+    return `custdataset_${lower.replace(/^_+/, "")}`;
+  }
+
+  /**
+   * Resolves a formula return type string (e.g., "STRING", "TEXT", "INTEGER", "FLOAT", "CURRENCY", "DATE")
+   * to the matching N/query.ReturnType value.
+   *
+   * @param {string} rawType
+   * @returns {string}
+   */
+  function resolveDatasetFormulaType(rawType) {
+    if (!rawType || typeof rawType !== "string") return "";
+    const upper = rawType.trim().toUpperCase();
+    if (!upper) return "";
+
+    if (query.ReturnType && query.ReturnType[upper]) {
+      return query.ReturnType[upper];
+    }
+
+    const aliases = {
+      TEXT: query.ReturnType ? query.ReturnType.STRING : "STRING",
+      VARCHAR: query.ReturnType ? query.ReturnType.STRING : "STRING",
+      CHAR: query.ReturnType ? query.ReturnType.STRING : "STRING",
+      INT: query.ReturnType ? query.ReturnType.INTEGER : "INTEGER",
+      NUMBER: query.ReturnType ? query.ReturnType.FLOAT : "FLOAT",
+      NUMERIC: query.ReturnType ? query.ReturnType.FLOAT : "FLOAT",
+      DECIMAL: query.ReturnType ? query.ReturnType.FLOAT : "FLOAT",
+      DOUBLE: query.ReturnType ? query.ReturnType.FLOAT : "FLOAT",
+      BOOL: query.ReturnType ? query.ReturnType.BOOLEAN : "BOOLEAN",
+      CHECKBOX: query.ReturnType ? query.ReturnType.BOOLEAN : "BOOLEAN",
+      TIMESTAMP: query.ReturnType ? query.ReturnType.DATETIME : "DATETIME",
+      DATETIMETZ: query.ReturnType ? query.ReturnType.DATETIME : "DATETIME",
+      CLOB: query.ReturnType ? query.ReturnType.CLOBTEXT : "CLOBTEXT",
+      TEXTAREA: query.ReturnType ? query.ReturnType.CLOBTEXT : "CLOBTEXT",
+      SELECT: query.ReturnType ? query.ReturnType.KEY : "KEY",
+    };
+
+    return aliases[upper] || upper;
+  }
+
+  /**
+   * Resolves a condition operator string (accepting both N/query.Operator names and N/search-style aliases)
+   * to the corresponding N/query.Operator value.
+   *
+   * @param {string} rawOperator
+   * @returns {string}
+   */
+  function resolveDatasetOperator(rawOperator) {
+    if (!rawOperator || typeof rawOperator !== "string") return "";
+    const trimmed = rawOperator.trim();
+    if (!trimmed) return "";
+    const upper = trimmed.toUpperCase();
+
+    if (upper === "AND" || upper === "OR") {
+      return upper;
+    }
+
+    if (query.Operator && query.Operator[upper]) {
+      return query.Operator[upper];
+    }
+
+    const op = query.Operator || {};
+    const aliases = {
+      // Equality / boolean
+      EQ: op.EQUAL || "EQUAL",
+      "=": op.EQUAL || "EQUAL",
+      "==": op.EQUAL || "EQUAL",
+      EQUALTO: op.EQUAL || "EQUAL",
+      EQUAL_TO: op.EQUAL || "EQUAL",
+      NE: op.EQUAL_NOT || "EQUAL_NOT",
+      "!=": op.EQUAL_NOT || "EQUAL_NOT",
+      "<>": op.EQUAL_NOT || "EQUAL_NOT",
+      NOTEQUAL: op.EQUAL_NOT || "EQUAL_NOT",
+      NOTEQUALTO: op.EQUAL_NOT || "EQUAL_NOT",
+      NOT_EQUAL: op.EQUAL_NOT || "EQUAL_NOT",
+      NOT_EQUAL_TO: op.EQUAL_NOT || "EQUAL_NOT",
+      ISNOT: op.IS_NOT || "IS_NOT",
+      NOT_IS: op.IS_NOT || "IS_NOT",
+
+      // List / multi-select membership
+      ANYOF: op.ANY_OF || "ANY_OF",
+      IN: op.ANY_OF || "ANY_OF",
+      NONEOF: op.ANY_OF_NOT || "ANY_OF_NOT",
+      NONE_OF: op.ANY_OF_NOT || "ANY_OF_NOT",
+      NOT_ANY_OF: op.ANY_OF_NOT || "ANY_OF_NOT",
+      NOTIN: op.ANY_OF_NOT || "ANY_OF_NOT",
+      NOT_IN: op.ANY_OF_NOT || "ANY_OF_NOT",
+      INCLUDEALL: op.INCLUDE_ALL || "MN_INCLUDE_ALL",
+      INCLUDEANY: op.INCLUDE_ANY || "MN_INCLUDE",
+      INCLUDEEXACTLY: op.INCLUDE_EXACTLY || "MN_INCLUDE_EXACTLY",
+      EXCLUDEALL: op.EXCLUDE_ALL || "MN_EXCLUDE",
+      EXCLUDEANY: op.EXCLUDE_ANY || "MN_EXCLUDE_ALL",
+      EXCLUDEEXACTLY: op.EXCLUDE_EXACTLY || "MN_EXCLUDE_EXACTLY",
+
+      // Null / empty
+      ISEMPTY: op.EMPTY || "EMPTY",
+      IS_EMPTY: op.EMPTY || "EMPTY",
+      ISNULL: op.EMPTY || "EMPTY",
+      IS_NULL: op.EMPTY || "EMPTY",
+      NULL: op.EMPTY || "EMPTY",
+      ISNOTEMPTY: op.EMPTY_NOT || "EMPTY_NOT",
+      IS_NOT_EMPTY: op.EMPTY_NOT || "EMPTY_NOT",
+      NOTEMPTY: op.EMPTY_NOT || "EMPTY_NOT",
+      NOT_EMPTY: op.EMPTY_NOT || "EMPTY_NOT",
+      ISNOTNULL: op.EMPTY_NOT || "EMPTY_NOT",
+      IS_NOT_NULL: op.EMPTY_NOT || "EMPTY_NOT",
+      NOTNULL: op.EMPTY_NOT || "EMPTY_NOT",
+      NOT_NULL: op.EMPTY_NOT || "EMPTY_NOT",
+
+      // String matching
+      CONTAINS: op.CONTAIN || "CONTAIN",
+      LIKE: op.CONTAIN || "CONTAIN",
+      DOESNOTCONTAIN: op.CONTAIN_NOT || "CONTAIN_NOT",
+      DOES_NOT_CONTAIN: op.CONTAIN_NOT || "CONTAIN_NOT",
+      NOTCONTAIN: op.CONTAIN_NOT || "CONTAIN_NOT",
+      NOTCONTAINS: op.CONTAIN_NOT || "CONTAIN_NOT",
+      NOT_CONTAIN: op.CONTAIN_NOT || "CONTAIN_NOT",
+      NOT_CONTAINS: op.CONTAIN_NOT || "CONTAIN_NOT",
+      STARTSWITH: op.START_WITH || "START_WITH",
+      STARTS_WITH: op.START_WITH || "START_WITH",
+      STARTWITH: op.START_WITH || "START_WITH",
+      DOESNOTSTARTWITH: op.START_WITH_NOT || "START_WITH_NOT",
+      DOES_NOT_START_WITH: op.START_WITH_NOT || "START_WITH_NOT",
+      NOTSTARTWITH: op.START_WITH_NOT || "START_WITH_NOT",
+      NOT_START_WITH: op.START_WITH_NOT || "START_WITH_NOT",
+      ENDSWITH: op.ENDWITH || "ENDWITH",
+      ENDS_WITH: op.ENDWITH || "ENDWITH",
+      END_WITH: op.ENDWITH || "ENDWITH",
+      DOESNOTENDWITH: op.ENDWITH_NOT || "ENDWITH_NOT",
+      DOES_NOT_END_WITH: op.ENDWITH_NOT || "ENDWITH_NOT",
+      NOTENDWITH: op.ENDWITH_NOT || "ENDWITH_NOT",
+      NOT_END_WITH: op.ENDWITH_NOT || "ENDWITH_NOT",
+      END_WITH_NOT: op.ENDWITH_NOT || "ENDWITH_NOT",
+
+      // Numeric comparisons
+      ">": op.GREATER || "GREATER",
+      GT: op.GREATER || "GREATER",
+      GREATERTHAN: op.GREATER || "GREATER",
+      GREATER_THAN: op.GREATER || "GREATER",
+      NOTGREATER: op.GREATER_NOT || "GREATER_NOT",
+      NOT_GREATER: op.GREATER_NOT || "GREATER_NOT",
+      ">=": op.GREATER_OR_EQUAL || "GREATER_OR_EQUAL",
+      GTE: op.GREATER_OR_EQUAL || "GREATER_OR_EQUAL",
+      GREATERTHANOREQUALTO: op.GREATER_OR_EQUAL || "GREATER_OR_EQUAL",
+      GREATER_THAN_OR_EQUAL_TO: op.GREATER_OR_EQUAL || "GREATER_OR_EQUAL",
+      GREATER_THAN_OR_EQUAL: op.GREATER_OR_EQUAL || "GREATER_OR_EQUAL",
+      "<": op.LESS || "LESS",
+      LT: op.LESS || "LESS",
+      LESSTHAN: op.LESS || "LESS",
+      LESS_THAN: op.LESS || "LESS",
+      NOTLESS: op.LESS_NOT || "LESS_NOT",
+      NOT_LESS: op.LESS_NOT || "LESS_NOT",
+      "<=": op.LESS_OR_EQUAL || "LESS_OR_EQUAL",
+      LTE: op.LESS_OR_EQUAL || "LESS_OR_EQUAL",
+      LESSTHANOREQUALTO: op.LESS_OR_EQUAL || "LESS_OR_EQUAL",
+      LESS_THAN_OR_EQUAL_TO: op.LESS_OR_EQUAL || "LESS_OR_EQUAL",
+      LESS_THAN_OR_EQUAL: op.LESS_OR_EQUAL || "LESS_OR_EQUAL",
+      NOTBETWEEN: op.BETWEEN_NOT || "BETWEEN_NOT",
+      NOT_BETWEEN: op.BETWEEN_NOT || "BETWEEN_NOT",
+
+      // Date comparisons
+      ONORAFTER: op.ON_OR_AFTER || "ON_OR_AFTER",
+      ON_OR_AFTER: op.ON_OR_AFTER || "ON_OR_AFTER",
+      NOTONORAFTER: op.ON_OR_AFTER_NOT || "ON_OR_AFTER_NOT",
+      ONORBEFORE: op.ON_OR_BEFORE || "ON_OR_BEFORE",
+      ON_OR_BEFORE: op.ON_OR_BEFORE || "ON_OR_BEFORE",
+      NOTONORBEFORE: op.ON_OR_BEFORE_NOT || "ON_OR_BEFORE_NOT",
+      NOTON: op.ON_NOT || "ON_NOT",
+      NOT_ON: op.ON_NOT || "ON_NOT",
+      NOTAFTER: op.AFTER_NOT || "AFTER_NOT",
+      NOT_AFTER: op.AFTER_NOT || "AFTER_NOT",
+      NOTBEFORE: op.BEFORE_NOT || "BEFORE_NOT",
+      NOT_BEFORE: op.BEFORE_NOT || "BEFORE_NOT",
+      NOTWITHIN: op.WITHIN_NOT || "WITHIN_NOT",
+      NOT_WITHIN: op.WITHIN_NOT || "WITHIN_NOT",
+    };
+
+    return aliases[upper] || upper;
+  }
+
+  /**
+   * Default polymorphic target candidates in N/dataset and N/query when a caller uses dot-notation
+   * or omits `target` on a polymorphic join field (e.g. `join: "transactionlines.item"` or `join: "entity"`).
+   */
+  const DEFAULT_POLYMORPHIC_JOIN_TARGETS = {
+    item: ["item", "generalizeditem"],
+    entity: ["entity", "customer", "vendor", "employee", "partner", "contact"],
+    createdby: ["entity", "employee"],
+    lastmodifiedby: ["entity", "employee"],
+  };
+
+  /**
+   * Normalizes a join specification (string dot-path, single join object, or array of join hops)
+   * into an array of canonical join hop descriptors: [{ fieldId, source?, target? }, ...]
+   * ordered from outermost (root record) to innermost hop.
+   *
+   * @param {*} rawJoin
+   * @returns {Array<{ fieldId: string, source: string|null, target: string|null }>}
+   */
+  function normalizeDatasetJoinHops(rawJoin) {
+    if (!rawJoin) return [];
+
+    if (typeof rawJoin === "string") {
+      const trimmed = rawJoin.trim();
+      if (!trimmed) return [];
+      const parts = trimmed
+        .split(".")
+        .map((p) => p.trim())
+        .filter(Boolean);
+      return parts.map((fieldId) => {
+        const lower = fieldId.toLowerCase();
+        const defaultTargets = DEFAULT_POLYMORPHIC_JOIN_TARGETS[lower];
+        return {
+          fieldId: fieldId,
+          source: null,
+          target: defaultTargets && defaultTargets.length > 0 ? defaultTargets[0] : null,
+        };
+      });
+    }
+
+    if (Array.isArray(rawJoin)) {
+      const hops = [];
+      for (let i = 0; i < rawJoin.length; i++) {
+        const subHops = normalizeDatasetJoinHops(rawJoin[i]);
+        for (let j = 0; j < subHops.length; j++) {
+          hops.push(subHops[j]);
+        }
+      }
+      return hops;
+    }
+
+    if (typeof rawJoin === "object") {
+      const fieldId =
+        typeof rawJoin.fieldId === "string" && rawJoin.fieldId.trim()
+          ? rawJoin.fieldId.trim()
+          : typeof rawJoin.name === "string" && rawJoin.name.trim()
+            ? rawJoin.name.trim()
+            : "";
+      if (!fieldId) {
+        throw new Error('Each dataset join object must include a non-empty string "fieldId".');
+      }
+
+      const source =
+        typeof rawJoin.source === "string" && rawJoin.source.trim()
+          ? rawJoin.source.trim()
+          : null;
+      const target =
+        typeof rawJoin.target === "string" && rawJoin.target.trim()
+          ? rawJoin.target.trim()
+          : null;
+
+      if (source && target) {
+        throw new Error(
+          `Invalid dataset join on field "${fieldId}": "source" (inverse join) and "target" (polymorphic join) are mutually exclusive.`,
+        );
+      }
+
+      // Auto-translate common native transaction sublist inverse-join mistakes into their canonical SuiteAnalytics forward join field IDs
+      const lowerField = fieldId.toLowerCase();
+      const lowerSource = source ? source.toLowerCase() : "";
+      let resolvedFieldId = fieldId;
+      let resolvedSource = source;
+
+      if (lowerField === "transaction" && (lowerSource === "transactionline" || lowerSource === "transactionlines")) {
+        resolvedFieldId = "transactionlines";
+        resolvedSource = null;
+      } else if (
+        (lowerField === "transactionline" || lowerField === "transactionlines") &&
+        (lowerSource === "transactionaccountingline" || lowerSource === "accountingimpact")
+      ) {
+        resolvedFieldId = "accountingimpact";
+        resolvedSource = null;
+      }
+
+      const defaultTargets =
+        !resolvedSource && !target ? DEFAULT_POLYMORPHIC_JOIN_TARGETS[resolvedFieldId.toLowerCase()] : null;
+      const resolvedTarget =
+        target || (defaultTargets && defaultTargets.length > 0 ? defaultTargets[0] : null);
+
+      const currentHop = {
+        fieldId: resolvedFieldId,
+        source: resolvedSource,
+        target: resolvedTarget,
+      };
+
+      if (rawJoin.join) {
+        return [currentHop].concat(normalizeDatasetJoinHops(rawJoin.join));
+      }
+      return [currentHop];
+    }
+
+    return [];
+  }
+
+  /**
+   * Builds a human-readable join path string (e.g. "transactionline.item" or "entity<customer>")
+   * from an array of normalized join hops.
+   *
+   * @param {Array<{ fieldId: string, source: string|null, target: string|null }>} hops
+   * @returns {string}
+   */
+  function formatDatasetJoinPath(hops) {
+    if (!Array.isArray(hops) || hops.length === 0) return "";
+    return hops
+      .map((h) => {
+        if (h.source) return `${h.source}(${h.fieldId})`;
+        if (h.target) return `${h.fieldId}<${h.target}>`;
+        return h.fieldId;
+      })
+      .join(".");
+  }
+
+  /**
+   * Builds (and caches by canonical signature) a `dataset.Join` object from an array of normalized join hops.
+   * Note: In N/dataset, a multi-level join is nested from outermost to innermost:
+   * `dataset.createJoin({ fieldId: 'outer', join: dataset.createJoin({ fieldId: 'inner' }) })`.
+   *
+   * @param {Array<{ fieldId: string, source: string|null, target: string|null }>} hops
+   * @param {Object} joinCache
+   * @returns {Object|null}
+   */
+  function buildDatasetJoinFromHops(hops, joinCache) {
+    if (!Array.isArray(hops) || hops.length === 0) return null;
+
+    const buildRecursive = (index) => {
+      const slice = hops.slice(index);
+      const cacheKey = JSON.stringify(slice);
+      if (joinCache[cacheKey]) {
+        return joinCache[cacheKey];
+      }
+
+      const hop = hops[index];
+      const childJoin = index + 1 < hops.length ? buildRecursive(index + 1) : null;
+
+      const joinOpts = {
+        fieldId: hop.fieldId,
+      };
+      if (hop.source) {
+        joinOpts.source = hop.source;
+      }
+      if (hop.target) {
+        joinOpts.target = hop.target;
+      }
+      if (childJoin) {
+        joinOpts.join = childJoin;
+      }
+
+      const createdJoin = dataset.createJoin(joinOpts);
+      joinCache[cacheKey] = createdJoin;
+      return createdJoin;
+    };
+
+    return buildRecursive(0);
+  }
+
+  /**
+   * Serializes an existing `dataset.Join` object into an array of `{ fieldId, source, target }` hops.
+   *
+   * @param {Object|null} joinObj
+   * @returns {Array<{ fieldId: string, source: string|null, target: string|null }>}
+   */
+  function extractHopsFromDatasetJoin(joinObj) {
+    const hops = [];
+    let curr = joinObj;
+    let guard = 0;
+    while (curr && typeof curr === "object" && curr.fieldId && guard < 15) {
+      guard++;
+      hops.push({
+        fieldId: String(curr.fieldId),
+        source: curr.source ? String(curr.source) : null,
+        target: curr.target ? String(curr.target) : null,
+      });
+      curr = curr.join || null;
+    }
+    return hops;
+  }
+
+  /**
+   * Generates a clean, unique column alias for a dataset column if one was not explicitly provided.
+   *
+   * @param {string|null} requestedAlias
+   * @param {string|null} fieldId
+   * @param {Array<{ fieldId: string, source: string|null, target: string|null }>} joinHops
+   * @param {number} index
+   * @param {Object} usedAliases
+   * @returns {string}
+   */
+  function allocateDatasetColumnAlias(requestedAlias, fieldId, joinHops, index, usedAliases) {
+    if (requestedAlias && typeof requestedAlias === "string" && requestedAlias.trim()) {
+      const cleanReq = requestedAlias.trim();
+      usedAliases[cleanReq] = (usedAliases[cleanReq] || 0) + 1;
+      return cleanReq;
+    }
+
+    const joinPrefix =
+      Array.isArray(joinHops) && joinHops.length > 0
+        ? joinHops
+            .map((h) => h.source || h.target || h.fieldId)
+            .join("_") + "_"
+        : "";
+    const rawBase = fieldId ? `${joinPrefix}${fieldId}` : `formula_${index + 1}`;
+    const sanitizedBase = rawBase.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^_+/, "") || `col_${index + 1}`;
+
+    if (!usedAliases[sanitizedBase]) {
+      usedAliases[sanitizedBase] = 1;
+      return sanitizedBase;
+    }
+
+    let counter = usedAliases[sanitizedBase] + 1;
+    while (usedAliases[`${sanitizedBase}_${counter}`]) {
+      counter++;
+    }
+    usedAliases[sanitizedBase] = counter;
+    const finalAlias = `${sanitizedBase}_${counter}`;
+    usedAliases[finalAlias] = 1;
+    return finalAlias;
+  }
+
+  /**
+   * Canonical signature key for a column definition (used to reuse existing dataset.Column instances in conditions).
+   *
+   * @param {string|null} fieldId
+   * @param {Array} joinHops
+   * @param {string|null} formula
+   * @param {string|null} formulaType
+   * @returns {string}
+   */
+  function getDatasetColumnSignature(fieldId, joinHops, formula, formulaType) {
+    if (formula) {
+      return `FORMULA:${formula.trim()}|TYPE:${formulaType || ""}`;
+    }
+    return `FIELD:${(fieldId || "").trim().toLowerCase()}|JOIN:${JSON.stringify(joinHops || [])}`;
+  }
+
+  /**
+   * Known SuiteAnalytics DATETIME fields that require a datetime string (e.g. "MM/dd/yyyy h:mm a")
+   * rather than a date-only string ("MM/dd/yyyy") in N/dataset conditions.
+   */
+  const KNOWN_DATASET_DATETIME_FIELDS = {
+    createddate: true,
+    lastmodifieddate: true,
+    created: true,
+    lastmodified: true,
+    datecreated: true,
+    systemnotesdate: true,
+    date: true, // on systemnote / scriptnote
+  };
+
+  /**
+   * Formats a JavaScript Date object into the NetSuite account's preferred DATE or DATETIME string via N/format.
+   *
+   * @param {Date} dateObj
+   * @param {boolean} asDateTime
+   * @returns {string}
+   */
+  function formatDatasetDateValue(dateObj, asDateTime) {
+    try {
+      if (format && typeof format.format === "function" && format.Type) {
+        return String(
+          format.format({
+            value: dateObj,
+            type: asDateTime ? format.Type.DATETIME : format.Type.DATE,
+          }),
+        );
+      }
+    } catch {
+      // Fallback if N/format throws
+    }
+
+    const mm = String(dateObj.getMonth() + 1).padStart(2, "0");
+    const dd = String(dateObj.getDate()).padStart(2, "0");
+    const yyyy = dateObj.getFullYear();
+    if (!asDateTime) {
+      return `${mm}/${dd}/${yyyy}`;
+    }
+    let hours = dateObj.getHours();
+    const ampm = hours >= 12 ? "pm" : "am";
+    hours = hours % 12;
+    if (hours === 0) hours = 12;
+    const mins = String(dateObj.getMinutes()).padStart(2, "0");
+    return `${mm}/${dd}/${yyyy} ${hours}:${mins} ${ampm}`;
+  }
+
+  /**
+   * Attempts to parse a date-only or datetime string (either ISO "YYYY-MM-DD[THH:mm:ss]" or US "MM/DD/YYYY")
+   * into `{ dateObj: Date, hasExplicitTime: boolean }`, or returns null if not a recognized date string.
+   *
+   * @param {string} rawStr
+   * @returns {{ dateObj: Date, hasExplicitTime: boolean } | null}
+   */
+  function tryParseConditionDateString(rawStr) {
+    if (typeof rawStr !== "string") return null;
+    const trimmed = rawStr.trim();
+    if (!trimmed) return null;
+
+    // 1. Check ISO YYYY-MM-DD or YYYY-MM-DDTHH:mm...
+    const isoDate = parseIsoDateString(trimmed);
+    if (isoDate) {
+      const hasTime = /^\d{4}-\d{2}-\d{2}[T ]\d{1,2}:\d{2}/.test(trimmed);
+      return { dateObj: isoDate, hasExplicitTime: hasTime };
+    }
+
+    // 2. Check date-only MM/DD/YYYY or M/D/YYYY (without time component)
+    const usDateOnlyMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+    if (usDateOnlyMatch) {
+      if (format && typeof format.parse === "function" && format.Type) {
+        try {
+          const parsedByNs = format.parse({
+            value: trimmed,
+            type: format.Type.DATE,
+          });
+          if (parsedByNs instanceof Date && !isNaN(parsedByNs.getTime())) {
+            return { dateObj: parsedByNs, hasExplicitTime: false };
+          }
+        } catch {
+          // Fall back to manual MM/DD/YYYY parse
+        }
+      }
+      const monthIndex = Number(usDateOnlyMatch[1]) - 1;
+      const day = Number(usDateOnlyMatch[2]);
+      const year = Number(usDateOnlyMatch[3]);
+      const d = new Date(year, monthIndex, day);
+      if (!isNaN(d.getTime()) && d.getFullYear() === year && d.getMonth() === monthIndex && d.getDate() === day) {
+        return { dateObj: d, hasExplicitTime: false };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Normalizes condition values for N/dataset and N/query:
+   * - Supports query.RelativeDateRange enum keys (e.g. "TODAY", "LAST_MONTH", "THIS_FISCAL_YEAR") on date operators
+   * - Supports relative date objects `{ dateId: "DAYS_AGO", value: 30 }` via query.createRelativeDate
+   * - Converts ISO date strings ("YYYY-MM-DD") and ISO datetime strings ("YYYY-MM-DDTHH:mm:ss") into the NetSuite
+   *   account's date/datetime preference format via N/format (and upgrades date-only strings to DATETIME format
+   *   when filtering on known datetime fields like `createddate` or `lastmodifieddate`, or when `forceDateTimeFormat` is set).
+   *
+   * @param {*} rawValues
+   * @param {string} resolvedOperator
+   * @param {string|null} [fieldId]
+   * @param {"DATETIME"|"DATE"|null} [forceDateFormatMode]
+   * @returns {Array<*>}
+   */
+  function normalizeDatasetConditionValues(rawValues, resolvedOperator, fieldId, forceDateFormatMode) {
+    if (rawValues === undefined || rawValues === null) {
+      return [];
+    }
+
+    const rawList = Array.isArray(rawValues) ? rawValues : [rawValues];
+    const dateOperators = {
+      AFTER: true,
+      AFTER_NOT: true,
+      BEFORE: true,
+      BEFORE_NOT: true,
+      ON: true,
+      ON_NOT: true,
+      ON_OR_AFTER: true,
+      ON_OR_AFTER_NOT: true,
+      ON_OR_BEFORE: true,
+      ON_OR_BEFORE_NOT: true,
+      WITHIN: true,
+      WITHIN_NOT: true,
+    };
+    const isDateOp = Boolean(dateOperators[resolvedOperator]);
+    const lowerField = typeof fieldId === "string" ? fieldId.trim().toLowerCase() : "";
+    const isKnownDateTimeField = Boolean(lowerField && KNOWN_DATASET_DATETIME_FIELDS[lowerField]);
+
+    const normalized = [];
+    for (let i = 0; i < rawList.length; i++) {
+      const item = rawList[i];
+
+      // 1. Check if item is a relative date object: { dateId: "DAYS_AGO", value: 5 }
+      if (
+        item &&
+        typeof item === "object" &&
+        !Array.isArray(item) &&
+        !(item instanceof Date) &&
+        typeof item.dateId === "string" &&
+        item.value !== undefined
+      ) {
+        const rawDateId = item.dateId.trim().toUpperCase();
+        const resolvedDateId =
+          query.DateId && query.DateId[rawDateId] ? query.DateId[rawDateId] : item.dateId.trim();
+        normalized.push(
+          query.createRelativeDate({
+            dateId: resolvedDateId,
+            value: Number(item.value),
+          }),
+        );
+        continue;
+      }
+
+      // 2. Check if item is a string matching query.RelativeDateRange (e.g., "TODAY", "THIS_MONTH" or "RelativeDateRange.TODAY")
+      if (typeof item === "string" && query.RelativeDateRange) {
+        const trimmed = item.trim();
+        const stripped = trimmed.replace(/^(?:query\.)?RelativeDateRange\./i, "").toUpperCase();
+        if (
+          (isDateOp || /^RelativeDateRange\./i.test(trimmed)) &&
+          Object.prototype.hasOwnProperty.call(query.RelativeDateRange, stripped)
+        ) {
+          normalized.push(query.RelativeDateRange[stripped]);
+          continue;
+        }
+      }
+
+      // 3. Check if item is an ISO date/datetime string (or date-only string on a datetime field / retry)
+      if (typeof item === "string") {
+        const parsedDateInfo = tryParseConditionDateString(item);
+        if (parsedDateInfo) {
+          const isIsoInput = /^\d{4}-\d{2}-\d{2}/.test(item.trim());
+          const shouldFormatAsDateTime =
+            forceDateFormatMode === "DATETIME" ||
+            (forceDateFormatMode !== "DATE" && (parsedDateInfo.hasExplicitTime || isKnownDateTimeField));
+
+          if (isIsoInput || shouldFormatAsDateTime || forceDateFormatMode === "DATE") {
+            normalized.push(formatDatasetDateValue(parsedDateInfo.dateObj, shouldFormatAsDateTime));
+            continue;
+          }
+        }
+      }
+
+      normalized.push(item);
+    }
+
+    return normalized;
+  }
+
+  /**
+   * Builds a `dataset.Condition` recursively from either:
+   * - A logical group node: `{ operator: "AND" | "OR", children: [...] }`
+   * - A leaf filter object: `{ fieldId (or name), join?, formula?, type?, alias?, operator, values? (or value?), caseSensitive? }`
+   *
+   * Automatically reuses an existing `dataset.Column` from `columnBySignature` or `columnByAlias` if available,
+   * or creates a new `dataset.Column` for the condition.
+   *
+   * @param {Object} condDef
+   * @param {Object} joinCache
+   * @param {Object} columnBySignature
+   * @param {Object} columnByAlias
+   * @param {Object} usedAliases
+   * @param {string} pathLabel
+   * @param {"DATETIME"|"DATE"|null} [forceDateFormatMode]
+   * @returns {Object}
+   */
+  function buildDatasetConditionNode(
+    condDef,
+    joinCache,
+    columnBySignature,
+    columnByAlias,
+    usedAliases,
+    pathLabel,
+    forceDateFormatMode,
+  ) {
+    if (!condDef || typeof condDef !== "object" || Array.isArray(condDef)) {
+      throw new Error(`Invalid condition at ${pathLabel}: expected a condition object.`);
+    }
+
+    const rawOp = typeof condDef.operator === "string" ? condDef.operator.trim() : "";
+    const hasChildren = Array.isArray(condDef.children);
+
+    // 1. Logical Group Condition (AND / OR with children)
+    if (hasChildren || rawOp.toUpperCase() === "AND" || rawOp.toUpperCase() === "OR") {
+      const groupOp = rawOp ? rawOp.toUpperCase() : "AND";
+      if (groupOp !== "AND" && groupOp !== "OR") {
+        throw new Error(
+          `Invalid logical group operator "${rawOp}" at ${pathLabel}: top-level/group conditions in N/dataset must use "AND" or "OR".`,
+        );
+      }
+      if (!Array.isArray(condDef.children) || condDef.children.length === 0) {
+        throw new Error(
+          `Invalid logical condition group at ${pathLabel}: "children" must be a non-empty array of condition objects when operator is "${groupOp}".`,
+        );
+      }
+
+      const childConditions = [];
+      for (let i = 0; i < condDef.children.length; i++) {
+        childConditions.push(
+          buildDatasetConditionNode(
+            condDef.children[i],
+            joinCache,
+            columnBySignature,
+            columnByAlias,
+            usedAliases,
+            `${pathLabel}.children[${i}]`,
+            forceDateFormatMode,
+          ),
+        );
+      }
+
+      return dataset.createCondition({
+        operator: groupOp,
+        children: childConditions,
+      });
+    }
+
+    // 2. Leaf Column Condition
+    if (!rawOp) {
+      throw new Error(
+        `Missing required "operator" at ${pathLabel} (e.g., "EQUAL", "ANY_OF", "IS", "CONTAIN", "EMPTY", "GREATER_OR_EQUAL", "WITHIN").`,
+      );
+    }
+
+    const resolvedOp = resolveDatasetOperator(rawOp);
+    const unaryOperators = {
+      EMPTY: true,
+      EMPTY_NOT: true,
+    };
+
+    let targetColumn = null;
+
+    // 2a. Check if the condition references an existing column by alias
+    const colAliasRef =
+      typeof condDef.columnAlias === "string" && condDef.columnAlias.trim()
+        ? condDef.columnAlias.trim()
+        : typeof condDef.alias === "string" && condDef.alias.trim() && !condDef.fieldId && !condDef.name && !condDef.formula
+          ? condDef.alias.trim()
+          : "";
+
+    if (colAliasRef && columnByAlias[colAliasRef]) {
+      targetColumn = columnByAlias[colAliasRef];
+    }
+
+    // 2b. Otherwise resolve or create the dataset.Column by fieldId/join or formula/type
+    if (!targetColumn) {
+      const fieldId =
+        typeof condDef.fieldId === "string" && condDef.fieldId.trim()
+          ? condDef.fieldId.trim()
+          : typeof condDef.name === "string" && condDef.name.trim()
+            ? condDef.name.trim()
+            : "";
+      const formula =
+        typeof condDef.formula === "string" && condDef.formula.trim()
+          ? condDef.formula.trim()
+          : "";
+      const formulaType =
+        typeof condDef.type === "string" && condDef.type.trim()
+          ? resolveDatasetFormulaType(condDef.type)
+          : "";
+
+      if (!fieldId && !formula) {
+        throw new Error(
+          `Invalid condition at ${pathLabel}: specify "fieldId" (or "formula" + "type", or "columnAlias" matching a defined column).`,
+        );
+      }
+
+      if (fieldId && formula) {
+        throw new Error(
+          `Invalid condition at ${pathLabel}: "fieldId" and "formula" are mutually exclusive in N/dataset.`,
+        );
+      }
+
+      const joinHops = normalizeDatasetJoinHops(condDef.join);
+      if (formula && joinHops.length > 0) {
+        throw new Error(
+          `Invalid condition at ${pathLabel}: N/dataset does not allow "formula" and "join" on the same column.`,
+        );
+      }
+
+      const sig = getDatasetColumnSignature(fieldId, joinHops, formula, formulaType);
+      if (columnBySignature[sig]) {
+        targetColumn = columnBySignature[sig];
+      } else {
+        const condAlias = allocateDatasetColumnAlias(
+          null,
+          fieldId ? `cond_${fieldId}` : null,
+          joinHops,
+          Object.keys(usedAliases || {}).length,
+          usedAliases || {},
+        );
+        const colOptions = {
+          alias: condAlias,
+        };
+        if (formula) {
+          if (!formulaType) {
+            throw new Error(
+              `Invalid formula condition at ${pathLabel}: "type" (e.g., "STRING", "INTEGER", "FLOAT", "CURRENCY", "DATE", "BOOLEAN") is required when "formula" is specified.`,
+            );
+          }
+          colOptions.formula = formula;
+          colOptions.type = formulaType;
+        } else {
+          colOptions.fieldId = fieldId;
+          if (joinHops.length > 0) {
+            colOptions.join = buildDatasetJoinFromHops(joinHops, joinCache);
+          }
+        }
+        try {
+          targetColumn = dataset.createColumn(colOptions);
+          columnBySignature[sig] = targetColumn;
+        } catch (colErr) {
+          const desc = formula ? `formula "${formula}"` : joinHops.length > 0 ? `${formatDatasetJoinPath(joinHops)}.${fieldId}` : fieldId;
+          throw new Error(
+            `Invalid field/column in condition at ${pathLabel} (${desc}): ${extractFieldsFromErrorMessage(getErrorMessage(colErr))}`,
+          );
+        }
+      }
+    }
+
+    const rawVals =
+      condDef.values !== undefined
+        ? condDef.values
+        : condDef.value !== undefined
+          ? condDef.value
+          : undefined;
+    const targetFieldIdForDate =
+      (targetColumn && targetColumn.fieldId) ||
+      (typeof condDef.fieldId === "string" ? condDef.fieldId : typeof condDef.name === "string" ? condDef.name : null);
+    const normalizedValues = normalizeDatasetConditionValues(
+      rawVals,
+      resolvedOp,
+      targetFieldIdForDate,
+      forceDateFormatMode || null,
+    );
+
+    const conditionOptions = {
+      column: targetColumn,
+      operator: resolvedOp,
+    };
+
+    if (!unaryOperators[resolvedOp]) {
+      if (normalizedValues.length === 0) {
+        throw new Error(
+          `Condition at ${pathLabel} with operator "${resolvedOp}" requires "values" (use "EMPTY" or "EMPTY_NOT" for unary null checks).`,
+        );
+      }
+      conditionOptions.values = normalizedValues;
+    }
+
+    if (typeof condDef.caseSensitive === "boolean") {
+      conditionOptions.caseSensitive = condDef.caseSensitive;
+    }
+
+    try {
+      return dataset.createCondition(conditionOptions);
+    } catch (condErr) {
+      throw new Error(
+        `Invalid condition at ${pathLabel} (operator "${resolvedOp}"): ${extractFieldsFromErrorMessage(getErrorMessage(condErr))}`,
+      );
+    }
+  }
+
+  /**
+   * Serializes a `dataset.Condition` tree into a clean JSON summary for the tool response.
+   *
+   * @param {Object|null} condObj
+   * @returns {Object|null}
+   */
+  function serializeDatasetCondition(condObj) {
+    if (!condObj || typeof condObj !== "object") return null;
+
+    if (Array.isArray(condObj.children) && condObj.children.length > 0) {
+      return {
+        operator: condObj.operator || "AND",
+        children: condObj.children.map((c) => serializeDatasetCondition(c)).filter(Boolean),
+      };
+    }
+
+    const col = condObj.column;
+    const joinHops = col && col.join ? extractHopsFromDatasetJoin(col.join) : [];
+    return {
+      ...(col && col.fieldId ? { fieldId: col.fieldId } : {}),
+      ...(joinHops.length > 0 ? { join: joinHops, joinPath: formatDatasetJoinPath(joinHops) } : {}),
+      ...(col && col.formula ? { formula: col.formula, type: col.type || null } : {}),
+      ...(col && col.alias ? { columnAlias: col.alias } : {}),
+      operator: condObj.operator || null,
+      ...(condObj.values !== undefined ? { values: condObj.values } : {}),
+      ...(typeof condObj.caseSensitive === "boolean" ? { caseSensitive: condObj.caseSensitive } : {}),
+    };
+  }
+
+  /**
+   * Looks up the saved `name` and `description` of an existing dataset by its scriptId
+   * using `query.load({ id })`, `dataset.describe({ id })`, and `dataset.list()`.
+   * Note: In NetSuite's `N/dataset` module, `dataset.load({ id }).name` returns the literal placeholder
+   * `"SuiteScript dataset"` rather than the dataset's actual saved name in SuiteAnalytics Workbook.
+   *
+   * @param {string} scriptId
+   * @returns {{ name: string|null, description: string|null }}
+   */
+  function lookupExistingDatasetMetadata(scriptId) {
+    if (!scriptId) return { name: null, description: null };
+    const lowerTarget = String(scriptId).trim().toLowerCase();
+    let foundName = null;
+    let foundDescription = null;
+
+    const isRealDatasetName = (val) =>
+      typeof val === "string" && val.trim() !== "" && val.trim() !== "SuiteScript dataset";
+
+    // 1. Check query.load({ id }).name
+    try {
+      if (query && typeof query.load === "function") {
+        const qLoaded = query.load({ id: scriptId });
+        if (qLoaded && isRealDatasetName(qLoaded.name)) {
+          foundName = String(qLoaded.name).trim();
+        }
+      }
+    } catch {
+      // Ignore query.load lookup errors
+    }
+
+    // 2. Check dataset.describe({ id })
+    try {
+      if (typeof dataset.describe === "function") {
+        const desc = dataset.describe({ id: scriptId });
+        const descObj = Array.isArray(desc) ? desc[0] : desc;
+        if (descObj && typeof descObj === "object") {
+          if (!foundName && isRealDatasetName(descObj.name)) {
+            foundName = String(descObj.name).trim();
+          }
+          if (descObj.description != null && String(descObj.description) !== "") {
+            foundDescription = String(descObj.description);
+          }
+        }
+      }
+    } catch {
+      // Ignore dataset.describe lookup errors
+    }
+
+    // 3. Check dataset.list()
+    if (!foundName || foundDescription === null) {
+      try {
+        if (typeof dataset.list === "function") {
+          const list = dataset.list();
+          if (Array.isArray(list)) {
+            for (let i = 0; i < list.length; i++) {
+              const item = list[i];
+              if (!item || typeof item !== "object") continue;
+              const itemId = item.id != null ? String(item.id).trim().toLowerCase() : "";
+              const itemScriptId = item.scriptId != null ? String(item.scriptId).trim().toLowerCase() : "";
+              if (itemId === lowerTarget || itemScriptId === lowerTarget) {
+                if (!foundName && isRealDatasetName(item.name)) {
+                  foundName = String(item.name).trim();
+                }
+                if (foundDescription === null && item.description != null) {
+                  foundDescription = String(item.description);
+                }
+                break;
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignore dataset.list lookup errors
+      }
+    }
+
+    return { name: foundName, description: foundDescription };
+  }
+
+  /**
+   * Builds an in-memory `N/query.Query` mirror from a `dataset.Dataset` object's `type`, `columns`, and `condition`.
+   * Used both to generate the equivalent SuiteQL (`qObj.toSuiteQL()`) and as a preview execution fallback
+   * (`qObj.runPaged()` / `qObj.run()`) when NetSuite's `datasetObj.run()` fails on multi-hop `dataset.Join` chains.
+   *
+   * @param {Object} datasetObj
+   * @returns {Object} The constructed `query.Query` object.
+   */
+  function buildMirrorQueryFromDataset(datasetObj) {
+    if (!datasetObj || !datasetObj.type) {
+      throw new Error("Dataset object is missing a valid record type.");
+    }
+
+    const qObj = query.create({ type: datasetObj.type });
+    const componentCache = {};
+
+    const resolveQueryComponent = (joinObj) => {
+      if (!joinObj) return qObj;
+      const hops = extractHopsFromDatasetJoin(joinObj);
+      if (hops.length === 0) return qObj;
+
+      let currComp = qObj;
+      const pathSoFar = [];
+
+      for (let i = 0; i < hops.length; i++) {
+        const hop = hops[i];
+        pathSoFar.push(hop);
+        const key = JSON.stringify(pathSoFar);
+
+        if (componentCache[key]) {
+          currComp = componentCache[key];
+          continue;
+        }
+
+        let nextComp = null;
+        if (hop.source) {
+          nextComp = currComp.joinFrom({
+            fieldId: hop.fieldId,
+            source: hop.source,
+          });
+        } else if (hop.target) {
+          try {
+            nextComp = currComp.joinTo({
+              fieldId: hop.fieldId,
+              target: hop.target,
+            });
+          } catch {
+            // If the field is a single-target join where joinTo is not needed, fall back to autoJoin
+            nextComp = currComp.autoJoin({
+              fieldId: hop.fieldId,
+            });
+          }
+        } else {
+          try {
+            nextComp = currComp.autoJoin({
+              fieldId: hop.fieldId,
+            });
+          } catch (autoJoinErr) {
+            // If autoJoin fails because `hop.fieldId` is a polymorphic field (e.g. `transactionlines.item` or `entity`)
+            // and the caller used dot-notation without specifying `target`, automatically try known polymorphic targets
+            const lowerHopField = hop.fieldId.toLowerCase();
+            const candidateTargets = (DEFAULT_POLYMORPHIC_JOIN_TARGETS[lowerHopField] || []).concat([
+              lowerHopField,
+            ]);
+            for (let tIdx = 0; tIdx < candidateTargets.length; tIdx++) {
+              try {
+                nextComp = currComp.joinTo({
+                  fieldId: hop.fieldId,
+                  target: candidateTargets[tIdx],
+                });
+                if (nextComp) break;
+              } catch {
+                // Try next target candidate
+              }
+            }
+            if (!nextComp) {
+              throw autoJoinErr;
+            }
+          }
+        }
+
+        componentCache[key] = nextComp;
+        currComp = nextComp;
+      }
+
+      return currComp;
+    };
+
+    const dsColumns = Array.isArray(datasetObj.columns) ? datasetObj.columns : [];
+    const qColumns = [];
+    for (let i = 0; i < dsColumns.length; i++) {
+      const col = dsColumns[i];
+      const comp = resolveQueryComponent(col.join || null);
+      const colOpts = {};
+      if (col.formula) {
+        colOpts.formula = col.formula;
+        if (col.type) colOpts.type = col.type;
+      } else if (col.fieldId) {
+        colOpts.fieldId = col.fieldId;
+      } else {
+        continue;
+      }
+      if (col.alias) colOpts.alias = col.alias;
+      if (col.label) colOpts.label = col.label;
+      qColumns.push(comp.createColumn(colOpts));
+    }
+    qObj.columns = qColumns;
+
+    const buildMirrorQueryCondition = (dsCond) => {
+      if (!dsCond) return null;
+      if (Array.isArray(dsCond.children) && dsCond.children.length > 0) {
+        const childQConds = dsCond.children
+          .map((c) => buildMirrorQueryCondition(c))
+          .filter(Boolean);
+        if (childQConds.length === 0) return null;
+        const op = String(dsCond.operator || "AND").toUpperCase();
+        if (op === "OR") {
+          return qObj.or.apply(qObj, childQConds);
+        }
+        return qObj.and.apply(qObj, childQConds);
+      }
+
+      const col = dsCond.column;
+      if (!col) return null;
+      const comp = resolveQueryComponent(col.join || null);
+      const condOpts = {
+        operator: dsCond.operator,
+      };
+      if (col.formula) {
+        condOpts.formula = col.formula;
+        if (col.type) condOpts.type = col.type;
+      } else if (col.fieldId) {
+        condOpts.fieldId = col.fieldId;
+      } else {
+        return null;
+      }
+
+      if (
+        dsCond.values !== undefined &&
+        dsCond.values !== null &&
+        !(Array.isArray(dsCond.values) && dsCond.values.length === 0)
+      ) {
+        condOpts.values = dsCond.values;
+      }
+
+      return comp.createCondition(condOpts);
+    };
+
+    if (datasetObj.condition) {
+      const mirroredCond = buildMirrorQueryCondition(datasetObj.condition);
+      if (mirroredCond) {
+        qObj.condition = mirroredCond;
+      }
+    }
+
+    return qObj;
+  }
+
+  /**
+   * Attempts to generate the equivalent SuiteQL string for a dataset definition.
+   * 1. If a saved/existing dataset ID is available and unmodified (or just saved), tries `query.load({ id }).toSuiteQL()`.
+   * 2. For in-memory dry-runs, constructs a parallel `N/query` object from the dataset's type, columns, and condition
+   *    and calls `queryObj.toSuiteQL()`.
+   * Never throws—returns `{ query: string|null, params: Array|null }`.
+   *
+   * @param {Object} datasetObj
+   * @param {string|null} savedOrExistingId
+   * @param {boolean} canLoadByIdDirectly
+   * @returns {{ query: string|null, params: Array<*>|null }}
+   */
+  function tryGenerateDatasetSuiteQL(datasetObj, savedOrExistingId, canLoadByIdDirectly) {
+    // 1. If the dataset was just saved or loaded without in-memory modifications, query.load({ id }).toSuiteQL() is authoritative
+    if (canLoadByIdDirectly && savedOrExistingId) {
+      try {
+        const loadedQuery = query.load({ id: savedOrExistingId });
+        if (loadedQuery && typeof loadedQuery.toSuiteQL === "function") {
+          const suiteQlObj = loadedQuery.toSuiteQL();
+          if (suiteQlObj && suiteQlObj.query) {
+            return {
+              query: String(suiteQlObj.query),
+              params: Array.isArray(suiteQlObj.params) && suiteQlObj.params.length > 0 ? suiteQlObj.params : null,
+            };
+          }
+        }
+      } catch {
+        // Fall through to in-memory N/query mirror
+      }
+    }
+
+    // 2. Build an in-memory N/query mirror from datasetObj.type, datasetObj.columns, and datasetObj.condition
+    try {
+      const qObj = buildMirrorQueryFromDataset(datasetObj);
+      if (qObj && typeof qObj.toSuiteQL === "function") {
+        const suiteQlObj = qObj.toSuiteQL();
+        if (suiteQlObj && suiteQlObj.query) {
+          return {
+            query: String(suiteQlObj.query),
+            params: Array.isArray(suiteQlObj.params) && suiteQlObj.params.length > 0 ? suiteQlObj.params : null,
+          };
+        }
+      }
+    } catch {
+      // Ignore if N/query conversion is not supported for a specific formula/join
+    }
+
+    return { query: null, params: null };
+  }
+
+  /**
+   * Builds a stable, descriptive key for a dataset column in preview row output.
+   *
+   * @param {Object} colMeta
+   * @param {number} index
+   * @param {Object} usedKeys
+   * @returns {string}
+   */
+  function buildDatasetPreviewColumnKey(colMeta, index, usedKeys) {
+    const label = colMeta.label != null && String(colMeta.label).trim() !== "" ? String(colMeta.label).trim() : "";
+    const joinPrefix = colMeta.joinPath ? `${colMeta.joinPath}.` : "";
+    const fieldPart = colMeta.fieldId || colMeta.alias || `column_${index + 1}`;
+    const baseKey = label || `${joinPrefix}${fieldPart}`;
+
+    if (!usedKeys[baseKey]) {
+      usedKeys[baseKey] = 1;
+      return baseKey;
+    }
+    usedKeys[baseKey] += 1;
+    return `${baseKey}_${usedKeys[baseKey]}`;
+  }
+
+  /**
+   * ACTION: CREATE_DATASET
+   * Builds, dry-runs (previews), and saves or updates a NetSuite SuiteAnalytics Dataset via N/dataset.
+   * When dryRun is true (default), executes the dataset in-memory without saving and returns the total
+   * match count, first maxRows preview rows, and generated SuiteQL query.
+   * When dryRun is false, creates a new dataset (or updates an existing one when overwrite is true)
+   * and returns the saved dataset scriptId, SuiteAnalytics Workbook Dataset URL, preview rows, and metrics.
+   *
+   * @param {Object} request
+   * @param {string} [request.type]
+   * @param {string} [request.recordType]
+   * @param {Array<Object|string>} [request.columns]
+   * @param {Array<Object>} [request.filters]
+   * @param {Object} [request.condition]
+   * @param {boolean} [request.dryRun=true]
+   * @param {number} [request.maxRows=25]
+   * @param {string} [request.name]
+   * @param {string} [request.title]
+   * @param {string} [request.description]
+   * @param {string} [request.id]
+   * @param {string} [request.scriptId]
+   * @param {boolean} [request.overwrite=false]
+   * @returns {Object}
+   */
+  function handleCreateDataset(request) {
+    const datasetType =
+      typeof request.type === "string" && request.type.trim()
+        ? request.type.trim().toLowerCase()
+        : typeof request.recordType === "string" && request.recordType.trim()
+          ? request.recordType.trim().toLowerCase()
+          : "";
+
+    const rawIdInput =
+      request.scriptId != null && String(request.scriptId).trim() !== ""
+        ? String(request.scriptId).trim()
+        : request.id != null && String(request.id).trim() !== ""
+          ? String(request.id).trim()
+          : "";
+    const normalizedScriptId = normalizeDatasetScriptId(rawIdInput);
+    const isDryRun = request.dryRun !== undefined ? Boolean(request.dryRun) : true;
+    const overwrite = Boolean(request.overwrite);
+
+    const datasetName =
+      typeof request.name === "string" && request.name.trim()
+        ? request.name.trim()
+        : typeof request.title === "string" && request.title.trim()
+          ? request.title.trim()
+          : "";
+    const hasExplicitDescription = request.description !== undefined && request.description !== null;
+    const datasetDescription = hasExplicitDescription ? String(request.description) : undefined;
+
+    const hasExplicitColumns = request.columns !== undefined && request.columns !== null;
+    const hasExplicitFilters = request.filters !== undefined && request.filters !== null;
+    const hasExplicitCondition = request.condition !== undefined && request.condition !== null;
+
+    if (!datasetType && !(overwrite && normalizedScriptId)) {
+      return makeErrorResponse(
+        'Missing or invalid dataset "type" (e.g., "transaction", "customer", "item", "employee", "customrecord_...").',
+      );
+    }
+
+    if (hasExplicitColumns) {
+      if (!Array.isArray(request.columns) || request.columns.length === 0) {
+        return makeErrorResponse('Invalid "columns": expected a non-empty array of dataset column definitions.');
+      }
+    } else if (!(overwrite && normalizedScriptId)) {
+      return makeErrorResponse('Missing required "columns": expected a non-empty array of dataset column definitions.');
+    }
+
+    if (hasExplicitFilters && hasExplicitCondition) {
+      const nonEmptyFilters = Array.isArray(request.filters) && request.filters.length > 0;
+      const nonEmptyCondition =
+        typeof request.condition === "object" && Object.keys(request.condition).length > 0;
+      if (nonEmptyFilters && nonEmptyCondition) {
+        return makeErrorResponse(
+          'Provide either "filters" (flat array of AND conditions) OR "condition" (nested AND/OR condition tree), not both.',
+        );
+      }
+    }
+
+    if (!isDryRun && !datasetName && !overwrite) {
+      return makeErrorResponse('Missing required "name" (or "title") when saving a dataset (dryRun: false).');
+    }
+
+    const rawMaxRows =
+      request.maxRows != null ? Number(request.maxRows) : request.limit != null ? Number(request.limit) : 25;
+    const maxRows = !isNaN(rawMaxRows) && rawMaxRows >= 0 ? Math.min(Math.floor(rawMaxRows), 1000) : 25;
+
+    try {
+      const script = runtime.getCurrentScript();
+      const startGovernance = script.getRemainingUsage();
+      const timer = new ExecutionTimer();
+
+      const joinCache = {};
+      const columnBySignature = {};
+      const columnByAlias = {};
+      const usedAliases = {};
+
+      // 1. If overwrite: true and scriptId is provided, attempt to load existing dataset first
+      let existingDataset = null;
+      let existingLoaded = false;
+      let existingMeta = { name: null, description: null };
+      if (overwrite && normalizedScriptId) {
+        try {
+          existingDataset = dataset.load({ id: normalizedScriptId });
+          existingLoaded = true;
+          existingMeta = lookupExistingDatasetMetadata(normalizedScriptId);
+        } catch (loadErr) {
+          if (!datasetType) {
+            return makeErrorResponse(
+              `Unable to load existing dataset "${normalizedScriptId}" for update: ${extractFieldsFromErrorMessage(getErrorMessage(loadErr))}`,
+            );
+          }
+          existingDataset = null;
+        }
+      }
+
+      const effectiveType =
+        datasetType || (existingDataset && existingDataset.type ? String(existingDataset.type) : "");
+      if (!effectiveType) {
+        return makeErrorResponse('Unable to determine dataset base record "type".');
+      }
+
+      if (
+        existingDataset &&
+        datasetType &&
+        existingDataset.type &&
+        String(existingDataset.type).toLowerCase() !== datasetType.toLowerCase()
+      ) {
+        return makeErrorResponse(
+          `Cannot change base record "type" of existing dataset "${normalizedScriptId}" from "${existingDataset.type}" to "${datasetType}". Create a new dataset with a different scriptId instead.`,
+        );
+      }
+
+      // 2. Construct N/dataset columns (or seed from existingDataset when omitted on overwrite)
+      const createdColumns = [];
+      if (hasExplicitColumns) {
+        for (let i = 0; i < request.columns.length; i++) {
+          const rawCol = request.columns[i];
+          const colDef =
+            typeof rawCol === "string" && rawCol.trim()
+              ? { fieldId: rawCol.trim() }
+              : rawCol;
+
+          if (!colDef || typeof colDef !== "object" || Array.isArray(colDef)) {
+            return makeErrorResponse(
+              `Invalid dataset column at index ${i}: expected a column object with "fieldId" (or "formula" + "type").`,
+            );
+          }
+
+          const fieldId =
+            typeof colDef.fieldId === "string" && colDef.fieldId.trim()
+              ? colDef.fieldId.trim()
+              : typeof colDef.name === "string" && colDef.name.trim()
+                ? colDef.name.trim()
+                : "";
+          const formula =
+            typeof colDef.formula === "string" && colDef.formula.trim()
+              ? colDef.formula.trim()
+              : "";
+          const rawFormulaType =
+            typeof colDef.type === "string" && colDef.type.trim()
+              ? colDef.type.trim()
+              : typeof colDef.returnType === "string" && colDef.returnType.trim()
+                ? colDef.returnType.trim()
+                : "";
+          const resolvedFormulaType = rawFormulaType ? resolveDatasetFormulaType(rawFormulaType) : "";
+
+          if (!fieldId && !formula) {
+            return makeErrorResponse(
+              `Invalid dataset column at index ${i}: each column must specify either "fieldId" or "formula" (with "type").`,
+            );
+          }
+          if (fieldId && formula) {
+            return makeErrorResponse(
+              `Invalid dataset column at index ${i}: "fieldId" and "formula" are mutually exclusive in N/dataset.`,
+            );
+          }
+
+          let joinHops = [];
+          try {
+            joinHops = normalizeDatasetJoinHops(colDef.join);
+          } catch (joinErr) {
+            return makeErrorResponse(`Invalid "join" on column at index ${i}: ${getErrorMessage(joinErr)}`);
+          }
+
+          if (formula && joinHops.length > 0) {
+            return makeErrorResponse(
+              `Invalid dataset column at index ${i}: N/dataset does not allow "formula" and "join" on the same column. Reference joined fields inside the formula or remove "join".`,
+            );
+          }
+
+          const alias = allocateDatasetColumnAlias(colDef.alias, fieldId, joinHops, i, usedAliases);
+          const colOptions = {
+            alias: alias,
+          };
+
+          if (typeof colDef.label === "string" && colDef.label.trim()) {
+            colOptions.label = colDef.label.trim();
+          }
+          if (typeof colDef.id === "number" && !isNaN(colDef.id)) {
+            colOptions.id = colDef.id;
+          }
+
+          if (formula) {
+            if (!resolvedFormulaType) {
+              return makeErrorResponse(
+                `Invalid formula column at index ${i} ("${formula}"): "type" (e.g., "STRING", "INTEGER", "FLOAT", "CURRENCY", "PERCENT", "DATE", "DATETIME", "BOOLEAN") is required for formula columns in N/dataset.`,
+              );
+            }
+            colOptions.formula = formula;
+            colOptions.type = resolvedFormulaType;
+          } else {
+            colOptions.fieldId = fieldId;
+            if (joinHops.length > 0) {
+              try {
+                colOptions.join = buildDatasetJoinFromHops(joinHops, joinCache);
+              } catch (joinBuildErr) {
+                return makeErrorResponse(
+                  `Invalid join "${formatDatasetJoinPath(joinHops)}" on column at index ${i} ("${fieldId}"): ${extractFieldsFromErrorMessage(getErrorMessage(joinBuildErr))}`,
+                );
+              }
+            }
+          }
+
+          try {
+            const createdCol = dataset.createColumn(colOptions);
+            createdColumns.push(createdCol);
+            const sig = getDatasetColumnSignature(fieldId, joinHops, formula, resolvedFormulaType);
+            if (!columnBySignature[sig]) {
+              columnBySignature[sig] = createdCol;
+            }
+            columnByAlias[alias] = createdCol;
+          } catch (colErr) {
+            const colDesc = formula
+              ? `formula "${formula}"`
+              : joinHops.length > 0
+                ? `${formatDatasetJoinPath(joinHops)}.${fieldId}`
+                : fieldId;
+            return makeErrorResponse(
+              `Invalid dataset column at index ${i} ("${colDesc}"): ${extractFieldsFromErrorMessage(getErrorMessage(colErr))}`,
+            );
+          }
+        }
+      } else if (existingDataset && Array.isArray(existingDataset.columns)) {
+        for (let i = 0; i < existingDataset.columns.length; i++) {
+          const exCol = existingDataset.columns[i];
+          createdColumns.push(exCol);
+          const exHops = exCol.join ? extractHopsFromDatasetJoin(exCol.join) : [];
+          const sig = getDatasetColumnSignature(exCol.fieldId || "", exHops, exCol.formula || "", exCol.type || "");
+          if (!columnBySignature[sig]) {
+            columnBySignature[sig] = exCol;
+          }
+          if (exCol.alias) {
+            columnByAlias[exCol.alias] = exCol;
+            usedAliases[exCol.alias] = 1;
+          }
+        }
+      }
+
+      if (createdColumns.length === 0) {
+        return makeErrorResponse('Missing required "columns": dataset must contain at least one column.');
+      }
+
+      // 3. Construct N/dataset condition from `condition` or `filters` (or preserve existingDataset.condition)
+      let finalCondition = null;
+      let shouldClearCondition = false;
+
+      const buildRequestedCondition = (forceDateFormatMode) => {
+        if (hasExplicitCondition) {
+          if (
+            request.condition === null ||
+            (typeof request.condition === "object" && Object.keys(request.condition).length === 0)
+          ) {
+            shouldClearCondition = true;
+            return null;
+          }
+          return buildDatasetConditionNode(
+            request.condition,
+            joinCache,
+            columnBySignature,
+            columnByAlias,
+            usedAliases,
+            "condition",
+            forceDateFormatMode,
+          );
+        } else if (hasExplicitFilters) {
+          if (!Array.isArray(request.filters)) {
+            throw new Error('Invalid "filters": expected an array of filter condition objects.');
+          }
+          if (request.filters.length === 0) {
+            shouldClearCondition = true;
+            return null;
+          }
+          const leafConditions = [];
+          for (let i = 0; i < request.filters.length; i++) {
+            leafConditions.push(
+              buildDatasetConditionNode(
+                request.filters[i],
+                joinCache,
+                columnBySignature,
+                columnByAlias,
+                usedAliases,
+                `filters[${i}]`,
+                forceDateFormatMode,
+              ),
+            );
+          }
+
+          if (leafConditions.length === 1) {
+            return leafConditions[0];
+          }
+          return dataset.createCondition({
+            operator: "AND",
+            children: leafConditions,
+          });
+        } else if (existingDataset && existingDataset.condition && !shouldClearCondition) {
+          return existingDataset.condition;
+        }
+        return null;
+      };
+
+      try {
+        finalCondition = buildRequestedCondition(null);
+      } catch (condBuildErr) {
+        return makeErrorResponse(extractFieldsFromErrorMessage(getErrorMessage(condBuildErr)));
+      }
+
+      // 4. Create or update the dataset object
+      // Note: On a dataset loaded via `dataset.load({ id })`, `.name`, `.description`, `.id`, and `.type`
+      // are read-only getters in NetSuite's N/dataset runtime (and `existingDataset.name` returns the literal
+      // placeholder `"SuiteScript dataset"` unless resolved via `dataset.list()`).
+      let datasetObj = null;
+      let operation = isDryRun ? "dry_run" : existingLoaded ? "update" : "create";
+
+      const loadedDatasetName =
+        existingMeta.name ||
+        (existingDataset &&
+        existingDataset.name &&
+        String(existingDataset.name) !== "SuiteScript dataset"
+          ? String(existingDataset.name)
+          : existingDataset && existingDataset.name
+            ? String(existingDataset.name)
+            : null);
+      const loadedDatasetDescription =
+        existingMeta.description !== null
+          ? existingMeta.description
+          : existingDataset && existingDataset.description != null && String(existingDataset.description) !== ""
+            ? String(existingDataset.description)
+            : null;
+
+      const resolvedName = datasetName || loadedDatasetName;
+      const resolvedDescription =
+        datasetDescription !== undefined ? datasetDescription : loadedDatasetDescription;
+      const resolvedScriptId =
+        normalizedScriptId || (existingDataset && existingDataset.id ? String(existingDataset.id) : null);
+
+      if (!isDryRun && !resolvedName) {
+        return makeErrorResponse('Missing required "name" (or "title") when saving a dataset (dryRun: false).');
+      }
+
+      const isUnmodifiedExisting =
+        existingLoaded && !hasExplicitColumns && !hasExplicitFilters && !hasExplicitCondition;
+
+      const createFreshDatasetInstance = (conditionToUse) => {
+        const createOptions = {
+          type: effectiveType,
+          columns: createdColumns,
+        };
+        if (conditionToUse) {
+          createOptions.condition = conditionToUse;
+        }
+        if (resolvedName) {
+          createOptions.name = resolvedName;
+        }
+        if (resolvedDescription !== null && resolvedDescription !== undefined) {
+          createOptions.description = resolvedDescription;
+        }
+        if (resolvedScriptId && !/^\d+$/.test(resolvedScriptId)) {
+          createOptions.id = resolvedScriptId;
+        }
+        return dataset.create(createOptions);
+      };
+
+      const instantiateDatasetObject = (conditionToUse) => {
+        if (existingDataset && isUnmodifiedExisting && isDryRun) {
+          return existingDataset;
+        }
+        return createFreshDatasetInstance(conditionToUse);
+      };
+
+      try {
+        datasetObj = instantiateDatasetObject(finalCondition);
+      } catch (createErr) {
+        return makeErrorResponse(
+          `Failed to create dataset definition for type "${effectiveType}": ${extractFieldsFromErrorMessage(getErrorMessage(createErr))}`,
+        );
+      }
+
+      // 5. Execute the dataset to validate and collect preview rows + totalMatchCount
+      const activeColumns = Array.isArray(datasetObj.columns) ? datasetObj.columns : createdColumns;
+      const usedPreviewKeys = {};
+      const columnMeta = activeColumns.map((col, idx) => {
+        const joinHops = col.join ? extractHopsFromDatasetJoin(col.join) : [];
+        const joinPath = formatDatasetJoinPath(joinHops);
+        const metaItem = {
+          key: "",
+          fieldId: col.fieldId || null,
+          alias: col.alias || null,
+          label: col.label || null,
+          ...(joinHops.length > 0 ? { join: joinHops, joinPath: joinPath } : {}),
+          ...(col.formula ? { formula: col.formula, type: col.type || null } : {}),
+        };
+        metaItem.key = buildDatasetPreviewColumnKey(metaItem, idx, usedPreviewKeys);
+        return metaItem;
+      });
+
+      let totalMatchCount = null;
+      const previewRows = [];
+
+      // Helper to detect if N/dataset or N/query threw an "Invalid date value ... (must match ...)" error
+      // because a date-only string was passed to a DATETIME field (or vice versa), and rebuild condition
+      const detectDateRetryModeFromError = (errObj) => {
+        const msg = extractFieldsFromErrorMessage(getErrorMessage(errObj));
+        if (!/Invalid date value/i.test(msg)) return null;
+        if (/h:mm|H:mm|mm:ss/i.test(msg)) {
+          return "DATETIME";
+        }
+        if (/must match/i.test(msg)) {
+          return "DATE";
+        }
+        return null;
+      };
+
+      // Executes a runnable (either datasetObj or an N/query mirror qObj) to collect totalMatchCount and rawResultItems
+      const executeRunnableForPreview = (runnable) => {
+        let count = null;
+        let items = [];
+        let pData = null;
+        const pageSize = Math.max(5, Math.min(maxRows > 0 ? maxRows : 50, 1000));
+
+        try {
+          pData = runnable.runPaged({ pageSize: pageSize });
+          count = typeof pData.count === "number" ? pData.count : null;
+        } catch (pErr) {
+          if (detectDateRetryModeFromError(pErr)) {
+            throw pErr;
+          }
+          pData = null;
+        }
+
+        if (maxRows > 0) {
+          if (pData && Array.isArray(pData.pageRanges) && pData.pageRanges.length > 0) {
+            for (let pIdx = 0; pIdx < pData.pageRanges.length && items.length < maxRows; pIdx++) {
+              const pageRange = pData.pageRanges[pIdx];
+              const pageIndex = pageRange && pageRange.index != null ? pageRange.index : pIdx;
+              const page = pData.fetch({ index: pageIndex });
+              const pageResults = page && page.data && Array.isArray(page.data.results) ? page.data.results : [];
+              for (let rIdx = 0; rIdx < pageResults.length && items.length < maxRows; rIdx++) {
+                items.push(pageResults[rIdx]);
+              }
+            }
+          } else if (count !== 0) {
+            const resultSet = runnable.run();
+            const allResults = resultSet && Array.isArray(resultSet.results) ? resultSet.results : [];
+            if (count === null) {
+              count = allResults.length;
+            }
+            items = allResults.slice(0, maxRows);
+          }
+        }
+
+        return { count: count, items: items };
+      };
+
+      let rawResultItems = [];
+      let previewError = null;
+
+      // 5a. First attempt: execute via datasetObj.runPaged() / datasetObj.run()
+      try {
+        const dsExec = executeRunnableForPreview(datasetObj);
+        totalMatchCount = dsExec.count;
+        rawResultItems = dsExec.items;
+      } catch (dsErr) {
+        const retryDateMode = detectDateRetryModeFromError(dsErr);
+        if (retryDateMode && (hasExplicitFilters || hasExplicitCondition)) {
+          try {
+            finalCondition = buildRequestedCondition(retryDateMode);
+            datasetObj = instantiateDatasetObject(finalCondition);
+            const retryExec = executeRunnableForPreview(datasetObj);
+            totalMatchCount = retryExec.count;
+            rawResultItems = retryExec.items;
+          } catch (retryErr) {
+            previewError = retryErr;
+          }
+        } else {
+          previewError = dsErr;
+        }
+      }
+
+      // 5b. Automatic N/query fallback: NetSuite's `datasetObj.run()` has a known SuiteScript 2.1 platform bug
+      // when executing multi-hop `dataset.Join` chains (`An unexpected SuiteScript error has occurred` or
+      // `Invalid identifier 'field^target'`), whereas `N/query` executes the exact same multi-hop joins cleanly.
+      if (previewError) {
+        try {
+          let mirrorQuery = buildMirrorQueryFromDataset(datasetObj);
+          try {
+            const qExec = executeRunnableForPreview(mirrorQuery);
+            totalMatchCount = qExec.count;
+            rawResultItems = qExec.items;
+            previewError = null;
+          } catch (qRunErr) {
+            const retryDateMode = detectDateRetryModeFromError(qRunErr);
+            if (retryDateMode && (hasExplicitFilters || hasExplicitCondition)) {
+              finalCondition = buildRequestedCondition(retryDateMode);
+              datasetObj = instantiateDatasetObject(finalCondition);
+              mirrorQuery = buildMirrorQueryFromDataset(datasetObj);
+              const qRetryExec = executeRunnableForPreview(mirrorQuery);
+              totalMatchCount = qRetryExec.count;
+              rawResultItems = qRetryExec.items;
+              previewError = null;
+            } else {
+              previewError = qRunErr;
+            }
+          }
+        } catch (qBuildErr) {
+          previewError = qBuildErr;
+        }
+      }
+
+      if (previewError) {
+        return makeErrorResponse(
+          `Dataset execution failed: ${extractFieldsFromErrorMessage(getErrorMessage(previewError))}`,
+        );
+      }
+
+      for (let rIdx = 0; rIdx < rawResultItems.length; rIdx++) {
+        const res = rawResultItems[rIdx];
+        const valsArray = res && Array.isArray(res.values) ? res.values : [];
+        let mappedObj = null;
+        try {
+          if (res && typeof res.asMap === "function") {
+            mappedObj = res.asMap();
+          }
+        } catch {
+          mappedObj = null;
+        }
+
+        const rowValues = {};
+        for (let cIdx = 0; cIdx < columnMeta.length; cIdx++) {
+          const cMeta = columnMeta[cIdx];
+          const colKey = cMeta.key;
+          let cellVal = cIdx < valsArray.length ? valsArray[cIdx] : null;
+          if (
+            cellVal === undefined &&
+            mappedObj &&
+            cMeta.alias &&
+            Object.prototype.hasOwnProperty.call(mappedObj, cMeta.alias)
+          ) {
+            cellVal = mappedObj[cMeta.alias];
+          }
+          rowValues[colKey] = cellVal !== undefined ? cellVal : null;
+        }
+
+        previewRows.push(rowValues);
+      }
+
+      // 6. Save the dataset when dryRun is false
+      let savedDatasetId = null;
+      if (!isDryRun) {
+        const saveOptionsWithId = {
+          name: resolvedName,
+        };
+        if (resolvedDescription !== null && resolvedDescription !== undefined) {
+          saveOptionsWithId.description = resolvedDescription;
+        }
+        if (resolvedScriptId && !/^\d+$/.test(resolvedScriptId)) {
+          saveOptionsWithId.id = resolvedScriptId;
+        }
+
+        if (existingLoaded && existingDataset) {
+          // Updating an existing dataset:
+          // IMPORTANT: Never call `.save()` WITHOUT `id` when updating an existing dataset! Calling `.save({ name, description })`
+          // without `id` causes NetSuite to insert a brand-new duplicate dataset with an auto-generated ID (`custdataset65`)
+          // instead of updating `resolvedScriptId`.
+          // Stage 1: Try saving in-place on `existingDataset` WITH `id: resolvedScriptId`.
+          const originalColumns = existingDataset.columns;
+          const originalCondition = existingDataset.condition;
+          let updatedInPlace = false;
+
+          try {
+            existingDataset.columns = createdColumns;
+            existingDataset.condition = finalCondition || null;
+
+            const saveResult = existingDataset.save(saveOptionsWithId);
+            const returnedId =
+              saveResult && saveResult.id != null ? String(saveResult.id).trim() : resolvedScriptId;
+            if (!resolvedScriptId || returnedId.toLowerCase() === resolvedScriptId.toLowerCase()) {
+              updatedInPlace = true;
+              savedDatasetId = returnedId || resolvedScriptId;
+            }
+          } catch {
+            updatedInPlace = false;
+          }
+
+          // Stage 2: In NetSuite's N/dataset module, `Dataset.save()` is insert-only (it throws "Unable to save the dataset"
+          // when `id` already exists). To overwrite an existing dataset with the same `scriptId`, we delete the existing
+          // dataset via `query.delete({ id })` and immediately save the updated definition under the same `scriptId`.
+          if (!updatedInPlace) {
+            try {
+              query.delete({ id: resolvedScriptId });
+            } catch (delErr) {
+              return makeErrorResponse(
+                `Dataset preview succeeded, but updating existing dataset "${resolvedScriptId}" failed (N/dataset does not support in-place overwrite and query.delete({ id: "${resolvedScriptId}" }) failed: ${extractFieldsFromErrorMessage(getErrorMessage(delErr))}). If this dataset is currently linked to a Workbook, update it in the SuiteAnalytics Workbook UI or save under a new scriptId.`,
+              );
+            }
+
+            try {
+              const freshToSave = createFreshDatasetInstance(finalCondition);
+              const saveResult = freshToSave.save(saveOptionsWithId);
+              savedDatasetId =
+                saveResult && saveResult.id != null
+                  ? String(saveResult.id)
+                  : resolvedScriptId;
+            } catch (recreateErr) {
+              // Recovery safeguard: attempt to restore the original dataset definition if saving the replacement failed
+              try {
+                const restoreDataset = dataset.create({
+                  type: effectiveType,
+                  columns: originalColumns,
+                  ...(originalCondition ? { condition: originalCondition } : {}),
+                  name: loadedDatasetName || resolvedName,
+                  ...(loadedDatasetDescription != null ? { description: loadedDatasetDescription } : {}),
+                  id: resolvedScriptId,
+                });
+                restoreDataset.save({
+                  name: loadedDatasetName || resolvedName,
+                  ...(loadedDatasetDescription != null ? { description: loadedDatasetDescription } : {}),
+                  id: resolvedScriptId,
+                });
+              } catch {
+                // Ignore recovery failure
+              }
+
+              return makeErrorResponse(
+                `Deleted existing dataset "${resolvedScriptId}" for overwrite, but saving the replacement dataset failed: ${extractFieldsFromErrorMessage(getErrorMessage(recreateErr))}`,
+              );
+            }
+          }
+        } else {
+          // Creating a new dataset
+          try {
+            const saveResult = datasetObj.save(saveOptionsWithId);
+            savedDatasetId =
+              saveResult && saveResult.id != null
+                ? String(saveResult.id)
+                : resolvedScriptId || (datasetObj.id ? String(datasetObj.id) : null);
+          } catch (saveErr) {
+            return makeErrorResponse(
+              `Dataset preview succeeded, but saving the dataset failed: ${extractFieldsFromErrorMessage(getErrorMessage(saveErr))}`,
+            );
+          }
+        }
+      }
+
+      // 7. Generate the equivalent SuiteQL query string when available
+      const canLoadByIdDirectly = !isDryRun || isUnmodifiedExisting;
+      const targetIdForSuiteQL = savedDatasetId || (existingLoaded ? resolvedScriptId : null);
+      const suiteQlInfo = tryGenerateDatasetSuiteQL(datasetObj, targetIdForSuiteQL, canLoadByIdDirectly);
+
+      const timeElapsedMS = timer.elapsed;
+      const governanceUsed = startGovernance - script.getRemainingUsage();
+
+      return {
+        success: true,
+        dryRun: isDryRun,
+        operation: operation,
+        existingDatasetLoaded: existingLoaded,
+        datasetType: effectiveType,
+        ...(savedDatasetId != null
+          ? {
+              savedDatasetId: savedDatasetId,
+              datasetUrl: `/app/Workbook/Dataset.nl?id=${savedDatasetId}`,
+            }
+          : existingLoaded && resolvedScriptId
+            ? {
+                datasetUrl: `/app/Workbook/Dataset.nl?id=${resolvedScriptId}`,
+              }
+            : {}),
+        ...(savedDatasetId || resolvedScriptId ? { scriptId: savedDatasetId || resolvedScriptId } : {}),
+        ...(resolvedName ? { name: resolvedName } : {}),
+        ...(resolvedDescription !== null && resolvedDescription !== undefined
+          ? { description: resolvedDescription }
+          : {}),
+        totalMatchCount: totalMatchCount,
+        previewRowCount: previewRows.length,
+        appliedCondition: serializeDatasetCondition(datasetObj.condition || null),
+        ...(suiteQlInfo.query ? { generatedSuiteQL: suiteQlInfo.query } : {}),
+        ...(suiteQlInfo.params ? { generatedSuiteQLParams: suiteQlInfo.params } : {}),
+        columns: columnMeta,
+        previewRows: previewRows,
+        timeElapsedMS: timeElapsedMS,
+        governanceUsed: governanceUsed,
+      };
+    } catch (e) {
+      return makeErrorResponse(
+        `Unable to ${isDryRun ? "run dataset dry-run" : "save dataset"}: ${extractFieldsFromErrorMessage(getErrorMessage(e))}`,
+      );
+    }
+  }
+
   // =========================================================================
   // ACTION DISPATCHER
   // =========================================================================
@@ -2590,6 +4509,7 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
     [MCP_ACTION.RENDER_EMAIL_TEMPLATE]: handleRenderEmailTemplate,
     [MCP_ACTION.GET_FILE]: handleGetFile,
     [MCP_ACTION.CREATE_SAVED_SEARCH]: handleCreateSavedSearch,
+    [MCP_ACTION.CREATE_DATASET]: handleCreateDataset,
   };
 
   /**
