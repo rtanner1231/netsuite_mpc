@@ -1,4 +1,5 @@
 import http from "http";
+import { createReadStream } from "fs";
 import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
@@ -467,6 +468,47 @@ const ensureSettingsServerRunning = async (
                     sendJson(res, 200, { success: true, ...status });
                 } catch (err: any) {
                     sendJson(res, 400, { success: false, error: err?.message || "Invalid environment name" });
+                }
+                return;
+            }
+
+            if (req.method === "GET" && parsedUrl.pathname === "/api/download-sqlite") {
+                const envParam = parsedUrl.searchParams.get("env") || "";
+                let envName: string;
+                try {
+                    envName = validateEnvNameForFilename(envParam);
+                } catch (err: any) {
+                    sendJson(res, 400, { success: false, error: err?.message || "Invalid environment name" });
+                    return;
+                }
+
+                const sqlitePath = getSqliteDbPath(envName);
+                try {
+                    const st = await fs.stat(sqlitePath);
+                    if (!st.isFile()) {
+                        sendJson(res, 404, { success: false, error: `Schema database '${envName}.db' not found.` });
+                        return;
+                    }
+
+                    const safeFilename = `${envName}.db`.replace(/"/g, "_");
+                    res.writeHead(200, {
+                        "Content-Type": "application/x-sqlite3",
+                        "Content-Disposition": `attachment; filename="${safeFilename}"`,
+                        "Content-Length": String(st.size),
+                        "Cache-Control": "no-store"
+                    });
+
+                    const stream = createReadStream(sqlitePath);
+                    stream.on("error", () => {
+                        if (!res.headersSent) {
+                            sendJson(res, 500, { success: false, error: "Failed to read SQLite database file." });
+                        } else {
+                            res.destroy();
+                        }
+                    });
+                    stream.pipe(res);
+                } catch {
+                    sendJson(res, 404, { success: false, error: `Schema database '${envName}.db' not found.` });
                 }
                 return;
             }

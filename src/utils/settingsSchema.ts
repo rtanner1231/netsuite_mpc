@@ -305,8 +305,8 @@ export const PROJECT_CONFIG_FIELDS: FieldSchema[] = [
         defaultValue: "auto",
         options: [
             { value: "auto", label: "Auto (build when TypeScript & build script exist)" },
-            { value: "true", label: "Always (true)" },
-            { value: "false", label: "Never (false)" }
+            { value: "true", label: "Always" },
+            { value: "false", label: "Never" }
         ],
         helpText: "Controls whether the project build command runs prior to uploading files."
     },
@@ -347,8 +347,8 @@ export const PROJECT_CONFIG_FIELDS: FieldSchema[] = [
         defaultValue: "auto",
         options: [
             { value: "auto", label: "Auto (copy if manifest.xml or Objects/ exists in project)" },
-            { value: "true", label: "Always (true)" },
-            { value: "false", label: "Never — background deploy only (false)" }
+            { value: "true", label: "Always" },
+            { value: "false", label: "Never — background deploy only" }
         ],
         helpText: "Controls whether SDF object XML files (and manifest.xml dependencies) are copied into the local project after deploying via the temporary SDF project. Can be overridden per tool call via saveToProject."
     },
@@ -472,27 +472,27 @@ export const getGlobalSectionsSchema = (): GlobalSectionSchema[] => {
         {
             id: "project",
             title: "Project & Build Defaults",
-            description: "Global defaults for SDF directory resolution, TypeScript path mapping, and pre-upload build behavior (saved under \"project\" in config.json).",
+            description: "Global defaults for SDF directory resolution, TypeScript path mapping, and pre-upload build behavior.",
             configPath: ["project"],
             fields: PROJECT_CONFIG_FIELDS
         },
         {
             id: "objectDefaults_RECORD",
-            title: "Custom Record SDF Defaults (RECORD)",
+            title: "Custom Record SDF Defaults",
             description: "Default SDF XML attributes applied when creating custom records via netsuite_create_custom_record.",
             configPath: ["objectDefaults", ObjectDefaultType.RECORD],
             fields: buildObjectDefaultsFields(projectDefaultsMap[ObjectDefaultType.RECORD])
         },
         {
             id: "objectDefaults_FIELD",
-            title: "Custom Field SDF Defaults (FIELD)",
+            title: "Custom Field SDF Defaults",
             description: "Default SDF XML attributes applied to custom record fields when creating or updating custom records.",
             configPath: ["objectDefaults", ObjectDefaultType.FIELD],
             fields: buildObjectDefaultsFields(projectDefaultsMap[ObjectDefaultType.FIELD])
         },
         {
             id: "objectDefaults_LIST",
-            title: "Custom List SDF Defaults (LIST)",
+            title: "Custom List SDF Defaults",
             description: "Default SDF XML attributes applied when creating custom lists via netsuite_create_custom_list.",
             configPath: ["objectDefaults", ObjectDefaultType.LIST],
             fields: buildObjectDefaultsFields(projectDefaultsMap[ObjectDefaultType.LIST])

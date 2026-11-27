@@ -862,13 +862,14 @@ export const renderSettingsHtml = (token: string): string => {
                 <span id="connPillText">Connected</span>
             </span>
             <span class="unsaved-pill" id="unsavedPill">Unsaved changes</span>
+            <button class="btn" id="discardBtn" style="display:none;" onclick="discardChanges()">Discard Changes</button>
             <button class="btn btn-primary" id="saveBtn" onclick="saveAllSettings()">Save Changes</button>
         </div>
     </header>
 
     <div class="tabs-bar">
-        <button class="tab-btn active" data-tab="environments" onclick="switchMainTab('environments')">Environments &amp; Tool Profiles (env.json &amp; state.json)</button>
-        <button class="tab-btn" data-tab="global" onclick="switchMainTab('global')">Global &amp; SDF Defaults (config.json)</button>
+        <button class="tab-btn active" data-tab="environments" onclick="switchMainTab('environments')">Environments &amp; Tool Profiles</button>
+        <button class="tab-btn" data-tab="global" onclick="switchMainTab('global')">Global &amp; SDF Defaults</button>
     </div>
 
     <div id="statusBanner" class="banner">
@@ -927,18 +928,75 @@ export const renderSettingsHtml = (token: string): string => {
         let openCategoryDetails = new Set(); // tracks which category details are expanded
         let selectedGlobalSectionId = null;
         let isDirty = false;
+        let savedSnapshot = null;
         let lastConfigVersion = null;
         let pendingRenames = []; // [{ from, to }]
         let envDbStatusCache = {}; // { [envName]: statusObj }
         let dbPollTimer = null;
 
+        function takeSavedSnapshot() {
+            savedSnapshot = JSON.parse(JSON.stringify({
+                activeEnvironment: appState.activeEnvironment,
+                activeProfile: appState.activeProfile || DEFAULT_PROFILE_NAME,
+                environments: appState.environments || {},
+                appConfig: appState.appConfig || {}
+            }));
+        }
+
         function markDirty(dirty = true) {
             isDirty = dirty;
             const pill = document.getElementById("unsavedPill");
+            const discardBtn = document.getElementById("discardBtn");
             if (dirty) {
                 pill.classList.add("visible");
+                if (discardBtn) discardBtn.style.display = "inline-flex";
             } else {
                 pill.classList.remove("visible");
+                if (discardBtn) discardBtn.style.display = "none";
+            }
+        }
+
+        async function discardChanges() {
+            pendingRenames = [];
+            hideBanner();
+            if (!savedSnapshot) {
+                await loadSettings(true);
+                return;
+            }
+            const restored = JSON.parse(JSON.stringify(savedSnapshot));
+            appState.activeEnvironment = restored.activeEnvironment;
+            appState.activeProfile = restored.activeProfile || DEFAULT_PROFILE_NAME;
+            appState.environments = restored.environments || {};
+            appState.appConfig = restored.appConfig || {};
+
+            Object.keys(appState.environments).forEach(envName => {
+                ensureEnvironmentProfiles(appState.environments[envName]);
+            });
+
+            const envNames = Object.keys(appState.environments);
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) {
+                if (appState.activeEnvironment && appState.environments[appState.activeEnvironment]) {
+                    selectedEnvName = appState.activeEnvironment;
+                } else if (envNames.length > 0) {
+                    selectedEnvName = envNames[0];
+                } else {
+                    selectedEnvName = null;
+                }
+            }
+
+            Object.keys(selectedProfileByEnv).forEach(envName => {
+                const env = appState.environments[envName];
+                if (!env) {
+                    delete selectedProfileByEnv[envName];
+                } else if (!env.profiles || !env.profiles[selectedProfileByEnv[envName]]) {
+                    selectedProfileByEnv[envName] = DEFAULT_PROFILE_NAME;
+                }
+            });
+
+            renderAll();
+            markDirty(false);
+            if (selectedEnvName) {
+                void refreshDbStatus(selectedEnvName);
             }
         }
 
@@ -1066,6 +1124,8 @@ export const renderSettingsHtml = (token: string): string => {
                     selectedGlobalSectionId = appState.schema.globalSections[0].id;
                 }
 
+                takeSavedSnapshot();
+                pendingRenames = [];
                 renderAll();
                 markDirty(false);
                 if (selectedEnvName) {
@@ -1259,6 +1319,10 @@ export const renderSettingsHtml = (token: string): string => {
                 if (res.ok && data.success) {
                     if (data.configVersion) {
                         lastConfigVersion = data.configVersion;
+                    }
+                    if (savedSnapshot && savedSnapshot.environments && savedSnapshot.environments[envName]) {
+                        savedSnapshot.activeEnvironment = envName;
+                        savedSnapshot.activeProfile = targetProf;
                     }
                     showBanner(
                         "<strong>Active environment set to '" + escapeHtml(envName) + "' (profile: '" + escapeHtml(targetProf) + "')!</strong> " +
@@ -1677,8 +1741,13 @@ export const renderSettingsHtml = (token: string): string => {
                         </div>
                         <div class="db-actions">
                             <button class="btn btn-sm \${st.sqliteExists ? '' : 'btn-primary'}" \${isRebuilding ? 'disabled' : ''} onclick="triggerSqliteFilePicker()">
-                                \${st.sqliteExists ? "Replace SQLite Database (.db)..." : "Load SQLite Database (.db)..."}
+                                \${st.sqliteExists ? "Replace SQLite Database..." : "Load SQLite Database..."}
                             </button>
+                            \${st.sqliteExists ? \`
+                            <button class="btn btn-sm" \${isRebuilding ? 'disabled' : ''} onclick="downloadSqliteDatabase()">
+                                Download SQLite Database
+                            </button>
+                            \` : ''}
                         </div>
                     </div>
 
@@ -1698,7 +1767,7 @@ export const renderSettingsHtml = (token: string): string => {
                                 \${(!st.sqliteExists || isRebuilding) ? 'disabled' : ''}
                                 onclick="triggerVectorDbRebuild()"
                             >
-                                \${isRebuilding ? "Rebuilding Vector Database..." : (st.lanceExists ? "Rebuild Vector Database (.lance)" : "Build Vector Database (.lance)")}
+                                \${isRebuilding ? "Rebuilding Vector Database..." : (st.lanceExists ? "Rebuild Vector Database" : "Build Vector Database")}
                             </button>
                         </div>
                     </div>
@@ -1712,6 +1781,18 @@ export const renderSettingsHtml = (token: string): string => {
             if (!input) return;
             input.value = "";
             input.click();
+        }
+
+        function downloadSqliteDatabase() {
+            if (!selectedEnvName) return;
+            const envName = selectedEnvName;
+            const downloadUrl = "/api/download-sqlite?token=" + encodeURIComponent(SESSION_TOKEN) + "&env=" + encodeURIComponent(envName);
+            const link = document.createElement("a");
+            link.href = downloadUrl;
+            link.download = envName + ".db";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
 
         async function handleSqliteFilePicked(inputEl) {
@@ -1920,7 +2001,7 @@ export const renderSettingsHtml = (token: string): string => {
                     if (lockedBySdfSetting) {
                         lockReasons.push("Locked by 'Disable SDF Tools' guardrail");
                     } else if (lockedByMissingSdfId) {
-                        lockReasons.push("Locked because 'SDF Auth ID (sdfId)' is not configured");
+                        lockReasons.push("Locked because 'SDF Auth ID' is not configured");
                     }
                     if (isExplicitlyBlocked) {
                         lockReasons.push("Hard-blocked in blockedTools (cannot be dynamically activated)");
@@ -2161,7 +2242,7 @@ export const renderSettingsHtml = (token: string): string => {
                     <div class="toggle-row">
                         <div class="toggle-info">
                             <div class="toggle-title">
-                                <span>Allow Dynamic Session Toolset Activation (<code>allowDynamicActivation</code>)</span>
+                                <span>Allow Dynamic Session Toolset Activation</span>
                                 <span class="badge badge-override">Context Saver</span>
                             </div>
                             <div class="toggle-desc">When enabled, exposes <code>netsuite_manage_toolsets</code> so the AI assistant can temporarily activate inactive tool categories on-demand for the current chat session. Never bypasses <code>disableDestructive</code>, <code>disableSdf</code>, or <code>blockedTools</code>.</div>
@@ -2179,7 +2260,7 @@ export const renderSettingsHtml = (token: string): string => {
                     <div class="toggle-row">
                         <div class="toggle-info">
                             <div class="toggle-title">
-                                <span>Disable Destructive Tools (<code>disableDestructive</code>)</span>
+                                <span>Disable Destructive Tools</span>
                                 <span class="badge badge-destructive">Hard Guardrail</span>
                             </div>
                             <div class="toggle-desc">Hard-blocks all tools that create/modify records, upload files, deploy SDF objects, or run server-side functions. Cannot be overridden dynamically. Recommended for Production.</div>
@@ -2197,11 +2278,11 @@ export const renderSettingsHtml = (token: string): string => {
                     <div class="toggle-row">
                         <div class="toggle-info">
                             <div class="toggle-title">
-                                <span>Disable SDF Tools (<code>disableSdf</code>)</span>
+                                <span>Disable SDF Tools</span>
                                 <span class="badge badge-sdf">Hard Guardrail</span>
                             </div>
                             <div class="toggle-desc">Hard-blocks all SuiteCloud Development Framework (SDF) deployment and file upload tools. Cannot be overridden dynamically.</div>
-                            \${sdfIdMissing ? '<div class="toggle-note">ℹ️ Note: SDF Auth ID (sdfId) is currently blank, so SDF tools are automatically disabled.</div>' : ''}
+                            \${sdfIdMissing ? '<div class="toggle-note">ℹ️ Note: SDF Auth ID is currently blank, so SDF tools are automatically disabled.</div>' : ''}
                         </div>
                         <label class="switch">
                             <input
@@ -2213,9 +2294,9 @@ export const renderSettingsHtml = (token: string): string => {
                         </label>
                     </div>
 
-                    <h4 style="margin: 20px 0 8px; font-size: 0.92rem; color: var(--text-primary);">Tool Categories (<code>enabledCategories</code>) &amp; Individual Tool Overrides</h4>
+                    <h4 style="margin: 20px 0 8px; font-size: 0.92rem; color: var(--text-primary);">Tool Categories &amp; Individual Tool Overrides</h4>
                     <div class="help-text" style="margin-bottom: 10px;">
-                        Toggle which categories are loaded at startup for the <strong>\${escapeHtml(selectedProfileName)}</strong> profile, or check <strong>Block Category</strong> to hard-block an entire category. Expand any category to toggle individual tools on/off at startup (<code>disabledTools</code> / <code>enabledTools</code>) or hard-block individual tools (<code>blockedTools</code>).
+                        Toggle which categories are loaded at startup for the <strong>\${escapeHtml(selectedProfileName)}</strong> profile, or check <strong>Block Category</strong> to hard-block an entire category. Expand any category to toggle individual tools on/off at startup or hard-block individual tools.
                     </div>
 
                     <div class="categories-grid">
@@ -2492,6 +2573,7 @@ export const renderSettingsHtml = (token: string): string => {
                     lastConfigVersion = data.configVersion;
                 }
                 pendingRenames = [];
+                takeSavedSnapshot();
                 markDirty(false);
                 if (selectedEnvName) {
                     void refreshDbStatus(selectedEnvName);
