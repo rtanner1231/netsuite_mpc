@@ -33,6 +33,7 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
     RENDER_PDF_TEMPLATE: "RENDER_PDF_TEMPLATE",
     RENDER_EMAIL_TEMPLATE: "RENDER_EMAIL_TEMPLATE",
     GET_FILE: "GET_FILE",
+    CREATE_SAVED_SEARCH: "CREATE_SAVED_SEARCH",
   };
 
   // =========================================================================
@@ -1949,6 +1950,630 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
     }
   }
 
+  /**
+   * Normalizes a custom search script ID so that non-numeric IDs always start with "customsearch_".
+   *
+   * @param {string|number|null} rawId
+   * @returns {string|null}
+   */
+  function normalizeSearchScriptId(rawId) {
+    if (rawId == null) return null;
+    const trimmed = String(rawId).trim();
+    if (!trimmed) return null;
+    if (/^\d+$/.test(trimmed)) {
+      return trimmed;
+    }
+    const lower = trimmed.toLowerCase();
+    if (lower.startsWith("customsearch_")) {
+      return lower;
+    }
+    return `customsearch_${lower.replace(/^_+/, "")}`;
+  }
+
+  /**
+   * Resolves a search summary string (e.g., "GROUP", "SUM", "COUNT", "AVG", "MIN", "MAX")
+   * to the corresponding N/search.Summary enum value.
+   *
+   * @param {string} rawSummary
+   * @returns {string|null}
+   */
+  function resolveSearchSummary(rawSummary) {
+    if (!rawSummary || typeof rawSummary !== "string") return null;
+    const upper = rawSummary.trim().toUpperCase();
+    if (!upper || upper === "NONE") return null;
+    if (search.Summary && search.Summary[upper]) {
+      return search.Summary[upper];
+    }
+    const aliases = {
+      AVERAGE: search.Summary ? search.Summary.AVG : "AVG",
+      MINIMUM: search.Summary ? search.Summary.MIN : "MIN",
+      MAXIMUM: search.Summary ? search.Summary.MAX : "MAX",
+    };
+    return aliases[upper] || upper;
+  }
+
+  /**
+   * Resolves a search sort direction string ("ASC", "DESC", "NONE") to N/search.Sort.
+   *
+   * @param {string} rawSort
+   * @returns {string|null}
+   */
+  function resolveSearchSort(rawSort) {
+    if (!rawSort || typeof rawSort !== "string") return null;
+    const upper = rawSort.trim().toUpperCase();
+    if (!upper || upper === "NONE") {
+      return search.Sort ? search.Sort.NONE : null;
+    }
+    if (upper === "ASC" || upper === "ASCENDING") {
+      return search.Sort ? search.Sort.ASC : "ASC";
+    }
+    if (upper === "DESC" || upper === "DESCENDING") {
+      return search.Sort ? search.Sort.DESC : "DESC";
+    }
+    return null;
+  }
+
+  /**
+   * Resolves a search filter operator (e.g. "anyof", "ANYOF", "is", "greaterthan")
+   * to the matching N/search.Operator value.
+   *
+   * @param {string} rawOperator
+   * @returns {string}
+   */
+  function resolveSearchOperator(rawOperator) {
+    if (!rawOperator || typeof rawOperator !== "string") return "";
+    const trimmed = rawOperator.trim();
+    if (!trimmed) return "";
+    const upper = trimmed.toUpperCase();
+    if (search.Operator && search.Operator[upper]) {
+      return search.Operator[upper];
+    }
+    return trimmed.toLowerCase();
+  }
+
+  /**
+   * Normalizes a NetSuite N/search filterExpression array recursively:
+   * - Normalizes boolean conjunctions ("and", "or", "not") to uppercase ("AND", "OR", "NOT")
+   * - Normalizes operator names in leaf filter clauses via resolveSearchOperator
+   * - Unwraps a single array value in the 3rd position of a leaf clause (e.g. ['field', 'anyof', ['@NONE@']]
+   *   -> ['field', 'anyof', '@NONE@'] or ['field', 'anyof', ['1', '2']] -> ['field', 'anyof', '1', '2'])
+   *   so that both createFilter-style array values and canonical filterExpression positional values work seamlessly.
+   *
+   * @param {*} expr
+   * @returns {*}
+   */
+  function normalizeFilterExpression(expr) {
+    if (!Array.isArray(expr)) {
+      if (typeof expr === "string") {
+        const upper = expr.trim().toUpperCase();
+        if (upper === "AND" || upper === "OR" || upper === "NOT") {
+          return upper;
+        }
+      }
+      return expr;
+    }
+
+    if (expr.length === 0) {
+      return [];
+    }
+
+    // Check if this is a leaf filter clause: [fieldNameOrFormula, operator, ...values]
+    // In a leaf clause, index 0 is a non-logical-operator string and index 1 is an operator string.
+    const first = expr[0];
+    const second = expr.length > 1 ? expr[1] : null;
+    const firstUpper = typeof first === "string" ? first.trim().toUpperCase() : "";
+    const secondUpper = typeof second === "string" ? second.trim().toUpperCase() : "";
+
+    const isLeafClause =
+      typeof first === "string" &&
+      firstUpper !== "NOT" &&
+      firstUpper !== "AND" &&
+      firstUpper !== "OR" &&
+      typeof second === "string" &&
+      secondUpper !== "AND" &&
+      secondUpper !== "OR" &&
+      secondUpper !== "NOT" &&
+      !expr.some((item, idx) => idx > 2 && Array.isArray(item));
+
+    if (isLeafClause) {
+      const fieldName = first.trim();
+      const operator = resolveSearchOperator(second);
+      const rest = expr.slice(2);
+
+      // If the caller passed a single array as the 3rd element (e.g., ['field', 'anyof', ['@NONE@']] or ['field', 'between', [1, 10]]),
+      // spread its elements into positional filterExpression arguments: ['field', 'anyof', '@NONE@']
+      if (rest.length === 1 && Array.isArray(rest[0])) {
+        return [fieldName, operator].concat(rest[0]);
+      }
+      return [fieldName, operator].concat(rest);
+    }
+
+    // Otherwise, recursively normalize nested clauses and logical operators
+    return expr.map((item) => normalizeFilterExpression(item));
+  }
+
+  /**
+   * Builds a stable, descriptive key for a search column in preview row output.
+   *
+   * @param {Object} col
+   * @param {number} index
+   * @param {Object} usedKeys
+   * @returns {string}
+   */
+  function buildPreviewColumnKey(col, index, usedKeys) {
+    const label = col.label != null && String(col.label).trim() !== "" ? String(col.label).trim() : "";
+    const joinPrefix = col.join ? `${String(col.join).trim()}.` : "";
+    const namePart = col.name ? String(col.name).trim() : `column_${index + 1}`;
+    const summarySuffix = col.summary ? ` (${String(col.summary)})` : "";
+    const baseKey = label || `${joinPrefix}${namePart}${summarySuffix}`;
+
+    if (!usedKeys[baseKey]) {
+      usedKeys[baseKey] = 1;
+      return baseKey;
+    }
+    usedKeys[baseKey] += 1;
+    return `${baseKey}_${usedKeys[baseKey]}`;
+  }
+
+  /**
+   * ACTION: CREATE_SAVED_SEARCH
+   * Builds and executes a NetSuite search definition via N/search.
+   * When dryRun is true (default), runs the search in-memory without saving and returns the total
+   * match count along with the first maxRows preview rows.
+   * When dryRun is false, creates a new saved search (or updates an existing one when overwrite is true)
+   * and returns the saved search ID, scriptId, preview rows, and execution metrics.
+   *
+   * @param {Object} request
+   * @param {string} [request.type]
+   * @param {string} [request.recordType]
+   * @param {Array<Object>} request.columns
+   * @param {Array<Object>} [request.filters]
+   * @param {Array<*>} [request.filterExpression]
+   * @param {Array<Object>|Object} [request.settings]
+   * @param {boolean} [request.dryRun=true]
+   * @param {number} [request.maxRows=25]
+   * @param {string} [request.title]
+   * @param {string} [request.id]
+   * @param {string} [request.scriptId]
+   * @param {boolean} [request.isPublic=false]
+   * @param {boolean} [request.overwrite=false]
+   * @returns {Object}
+   */
+  function handleCreateSavedSearch(request) {
+    const searchType =
+      typeof request.type === "string" && request.type.trim()
+        ? request.type.trim()
+        : typeof request.recordType === "string" && request.recordType.trim()
+          ? request.recordType.trim()
+          : "";
+
+    const rawIdInput =
+      request.scriptId != null && String(request.scriptId).trim() !== ""
+        ? String(request.scriptId).trim()
+        : request.id != null && String(request.id).trim() !== ""
+          ? String(request.id).trim()
+          : "";
+    const normalizedScriptId = normalizeSearchScriptId(rawIdInput);
+    const isDryRun = request.dryRun !== undefined ? Boolean(request.dryRun) : true;
+    const overwrite = Boolean(request.overwrite);
+    const title = typeof request.title === "string" ? request.title.trim() : "";
+
+    const hasExplicitColumns = request.columns !== undefined && request.columns !== null;
+    const hasExplicitFilters = request.filters !== undefined && request.filters !== null;
+    const hasExplicitFilterExpression = request.filterExpression !== undefined && request.filterExpression !== null;
+
+    if (!searchType && !(overwrite && normalizedScriptId)) {
+      return makeErrorResponse('Missing or invalid search "type" (e.g., "transaction", "salesorder", "customer", "customrecord_...").');
+    }
+
+    if (hasExplicitColumns) {
+      if (!Array.isArray(request.columns) || request.columns.length === 0) {
+        return makeErrorResponse('Invalid "columns": expected a non-empty array of search column definitions.');
+      }
+    } else if (!(overwrite && normalizedScriptId)) {
+      return makeErrorResponse('Missing required "columns": expected a non-empty array of search column definitions.');
+    }
+
+    if (hasExplicitFilters && hasExplicitFilterExpression) {
+      if (Array.isArray(request.filters) && request.filters.length > 0 && Array.isArray(request.filterExpression) && request.filterExpression.length > 0) {
+        return makeErrorResponse('Provide either "filters" (array of filter objects) OR "filterExpression" (nested filter expression array), not both.');
+      }
+    }
+
+    if (!isDryRun && !title && !overwrite) {
+      return makeErrorResponse('Missing required "title" when saving a search (dryRun: false).');
+    }
+
+    const rawMaxRows = request.maxRows != null ? Number(request.maxRows) : request.limit != null ? Number(request.limit) : 25;
+    const maxRows = !isNaN(rawMaxRows) && rawMaxRows >= 0 ? Math.min(Math.floor(rawMaxRows), 1000) : 25;
+
+    try {
+      const script = runtime.getCurrentScript();
+      const startGovernance = script.getRemainingUsage();
+      const timer = new ExecutionTimer();
+
+      // 1. Construct N/search columns with per-column diagnostics (if provided)
+      const createdColumns = [];
+      if (hasExplicitColumns) {
+        for (let i = 0; i < request.columns.length; i++) {
+          const colDef = request.columns[i];
+          if (typeof colDef === "string" && colDef.trim()) {
+            try {
+              createdColumns.push(search.createColumn({ name: colDef.trim() }));
+            } catch (colErr) {
+              return makeErrorResponse(
+                `Invalid search column at index ${i} ("${colDef}"): ${extractFieldsFromErrorMessage(getErrorMessage(colErr))}`,
+              );
+            }
+            continue;
+          }
+
+          if (!colDef || typeof colDef !== "object" || typeof colDef.name !== "string" || !colDef.name.trim()) {
+            return makeErrorResponse(
+              `Invalid search column at index ${i}: each column must be an object with a non-empty string "name".`,
+            );
+          }
+
+          const colOptions = {
+            name: colDef.name.trim(),
+          };
+
+          if (typeof colDef.join === "string" && colDef.join.trim()) {
+            colOptions.join = colDef.join.trim();
+          }
+          if (typeof colDef.summary === "string" && colDef.summary.trim()) {
+            const resolvedSum = resolveSearchSummary(colDef.summary);
+            if (resolvedSum) colOptions.summary = resolvedSum;
+          }
+          if (typeof colDef.formula === "string" && colDef.formula.trim()) {
+            colOptions.formula = colDef.formula;
+          }
+          if (typeof colDef.label === "string" && colDef.label.trim()) {
+            colOptions.label = colDef.label.trim();
+          }
+          if (typeof colDef.function === "string" && colDef.function.trim()) {
+            colOptions.function = colDef.function.trim();
+          }
+          if (typeof colDef.sort === "string" && colDef.sort.trim()) {
+            const resolvedSort = resolveSearchSort(colDef.sort);
+            if (resolvedSort) colOptions.sort = resolvedSort;
+          }
+
+          try {
+            createdColumns.push(search.createColumn(colOptions));
+          } catch (colErr) {
+            const colDesc = colOptions.join ? `${colOptions.join}.${colOptions.name}` : colOptions.name;
+            return makeErrorResponse(
+              `Invalid search column at index ${i} ("${colDesc}"): ${extractFieldsFromErrorMessage(getErrorMessage(colErr))}`,
+            );
+          }
+        }
+      }
+
+      // 2. Construct N/search filters or filterExpression
+      let createdFilters = null;
+      let filterExpression = null;
+      let shouldClearFilters = false;
+
+      if (hasExplicitFilterExpression) {
+        if (!Array.isArray(request.filterExpression)) {
+          return makeErrorResponse('Invalid "filterExpression": expected an array.');
+        }
+        if (request.filterExpression.length === 0) {
+          shouldClearFilters = true;
+        } else {
+          filterExpression = normalizeFilterExpression(request.filterExpression);
+        }
+      } else if (hasExplicitFilters) {
+        if (!Array.isArray(request.filters)) {
+          return makeErrorResponse('Invalid "filters": expected an array.');
+        }
+        if (request.filters.length === 0) {
+          shouldClearFilters = true;
+        } else if (Array.isArray(request.filters[0]) || typeof request.filters[0] === "string") {
+          // Detect if the caller passed a filterExpression array inside `filters`
+          filterExpression = normalizeFilterExpression(request.filters);
+        } else {
+          createdFilters = [];
+          for (let i = 0; i < request.filters.length; i++) {
+            const fDef = request.filters[i];
+            if (!fDef || typeof fDef !== "object") {
+              return makeErrorResponse(`Invalid search filter at index ${i}: expected a filter object.`);
+            }
+            if (typeof fDef.name !== "string" || !fDef.name.trim()) {
+              return makeErrorResponse(`Invalid search filter at index ${i}: missing non-empty string "name".`);
+            }
+            if (typeof fDef.operator !== "string" || !fDef.operator.trim()) {
+              return makeErrorResponse(
+                `Invalid search filter at index ${i} ("${fDef.name}"): missing non-empty string "operator" (e.g., "anyof", "is", "greaterthan").`,
+              );
+            }
+
+            const filterOptions = {
+              name: fDef.name.trim(),
+              operator: resolveSearchOperator(fDef.operator),
+            };
+
+            if (typeof fDef.join === "string" && fDef.join.trim()) {
+              filterOptions.join = fDef.join.trim();
+            }
+            if (fDef.values !== undefined && fDef.values !== null) {
+              filterOptions.values = fDef.values;
+            } else if (fDef.value !== undefined && fDef.value !== null) {
+              filterOptions.values = fDef.value;
+            }
+            if (typeof fDef.formula === "string" && fDef.formula.trim()) {
+              filterOptions.formula = fDef.formula;
+            }
+            if (typeof fDef.summary === "string" && fDef.summary.trim()) {
+              const resolvedSum = resolveSearchSummary(fDef.summary);
+              if (resolvedSum) filterOptions.summary = resolvedSum;
+            }
+
+            try {
+              createdFilters.push(search.createFilter(filterOptions));
+            } catch (filterErr) {
+              const fDesc = filterOptions.join ? `${filterOptions.join}.${filterOptions.name}` : filterOptions.name;
+              return makeErrorResponse(
+                `Invalid search filter at index ${i} ("${fDesc}" ${filterOptions.operator}): ${extractFieldsFromErrorMessage(getErrorMessage(filterErr))}`,
+              );
+            }
+          }
+        }
+      }
+
+      // 3. Construct N/search settings if provided
+      const createdSettings = [];
+      if (Array.isArray(request.settings)) {
+        for (let i = 0; i < request.settings.length; i++) {
+          const sDef = request.settings[i];
+          if (sDef && typeof sDef === "object" && typeof sDef.name === "string" && sDef.name.trim()) {
+            try {
+              createdSettings.push(
+                search.createSetting({
+                  name: sDef.name.trim(),
+                  value: sDef.value != null ? String(sDef.value) : "",
+                }),
+              );
+            } catch (sErr) {
+              return makeErrorResponse(
+                `Invalid search setting "${sDef.name}": ${extractFieldsFromErrorMessage(getErrorMessage(sErr))}`,
+              );
+            }
+          }
+        }
+      } else if (request.settings && typeof request.settings === "object") {
+        for (const sKey of Object.keys(request.settings)) {
+          try {
+            createdSettings.push(
+              search.createSetting({
+                name: sKey,
+                value: String(request.settings[sKey]),
+              }),
+            );
+          } catch (sErr) {
+            return makeErrorResponse(
+              `Invalid search setting "${sKey}": ${extractFieldsFromErrorMessage(getErrorMessage(sErr))}`,
+            );
+          }
+        }
+      }
+
+      // 4. Create or Load (when overwrite: true and existing search is found) the search object
+      let searchObj = null;
+      let operation = isDryRun ? "dry_run" : "create";
+      let existingLoaded = false;
+
+      if (overwrite && normalizedScriptId) {
+        try {
+          searchObj = search.load({
+            id: normalizedScriptId,
+            ...(searchType ? { type: searchType } : {}),
+          });
+          existingLoaded = true;
+          if (!isDryRun) {
+            operation = "update";
+          }
+        } catch (loadErr) {
+          // If the search does not exist yet and searchType was provided, fall back to creating a new search
+          if (!searchType) {
+            return makeErrorResponse(
+              `Unable to load existing saved search "${normalizedScriptId}" for update: ${extractFieldsFromErrorMessage(getErrorMessage(loadErr))}`,
+            );
+          }
+          searchObj = null;
+        }
+      }
+
+      if (searchObj) {
+        // Updating an existing search: only replace columns/filters/settings that were explicitly provided
+        if (hasExplicitColumns) {
+          searchObj.columns = createdColumns;
+        }
+        if (filterExpression) {
+          try {
+            searchObj.filterExpression = filterExpression;
+          } catch (feErr) {
+            return makeErrorResponse(
+              `Invalid filterExpression: ${extractFieldsFromErrorMessage(getErrorMessage(feErr))}`,
+            );
+          }
+        } else if (createdFilters) {
+          searchObj.filters = createdFilters;
+        } else if (shouldClearFilters) {
+          searchObj.filters = [];
+        }
+        if (createdSettings.length > 0) {
+          searchObj.settings = createdSettings;
+        }
+      } else {
+        if (!hasExplicitColumns || createdColumns.length === 0) {
+          return makeErrorResponse('Missing required "columns": expected a non-empty array of search column definitions when creating a new search.');
+        }
+
+        // Note: N/search.create accepts either an array of search.Filter objects OR a filterExpression array under the `filters` option
+        // (it silently ignores `createOptions.filterExpression`!). We also assign `searchObj.filterExpression` directly to guarantee application.
+        const createOptions = {
+          type: searchType,
+          columns: createdColumns,
+        };
+        if (filterExpression) {
+          createOptions.filters = filterExpression;
+        } else if (createdFilters && createdFilters.length > 0) {
+          createOptions.filters = createdFilters;
+        }
+        if (createdSettings.length > 0) {
+          createOptions.settings = createdSettings;
+        }
+
+        try {
+          searchObj = search.create(createOptions);
+          if (filterExpression) {
+            searchObj.filterExpression = filterExpression;
+          }
+        } catch (createErr) {
+          return makeErrorResponse(
+            `Failed to create search definition for type "${searchType}": ${extractFieldsFromErrorMessage(getErrorMessage(createErr))}`,
+          );
+        }
+      }
+
+      // 5. Execute the search to validate and collect preview rows + totalMatchCount
+      let totalMatchCount = null;
+      const previewRows = [];
+      const activeColumns = searchObj.columns || createdColumns;
+      const usedKeys = {};
+      const columnMeta = activeColumns.map((col, idx) => ({
+        key: buildPreviewColumnKey(col, idx, usedKeys),
+        name: col.name,
+        join: col.join || null,
+        summary: col.summary || null,
+        label: col.label || null,
+        formula: col.formula || null,
+        sort: col.sort || null,
+        function: col.function || null,
+      }));
+
+      try {
+        const pagedData = searchObj.runPaged({ pageSize: Math.max(50, Math.min(maxRows || 50, 1000)) });
+        totalMatchCount = typeof pagedData.count === "number" ? pagedData.count : null;
+      } catch {
+        // Fallback if runPaged is unsupported for a specific search type or summary configuration
+        totalMatchCount = null;
+      }
+
+      if (maxRows > 0) {
+        let rawResults = [];
+        try {
+          rawResults = searchObj.run().getRange({ start: 0, end: maxRows }) || [];
+        } catch (runErr) {
+          return makeErrorResponse(
+            `Search execution failed: ${extractFieldsFromErrorMessage(getErrorMessage(runErr))}`,
+          );
+        }
+
+        for (let rIdx = 0; rIdx < rawResults.length; rIdx++) {
+          const res = rawResults[rIdx];
+          const rowValues = {};
+
+          for (let cIdx = 0; cIdx < activeColumns.length; cIdx++) {
+            const col = activeColumns[cIdx];
+            const colKey = columnMeta[cIdx].key;
+            let val = null;
+            let txt = null;
+
+            try {
+              val = res.getValue(col);
+            } catch {
+              val = null;
+            }
+            try {
+              txt = res.getText(col);
+            } catch {
+              txt = null;
+            }
+
+            if (txt != null && txt !== "" && String(txt) !== String(val)) {
+              rowValues[colKey] = {
+                value: val,
+                text: txt,
+              };
+            } else {
+              rowValues[colKey] = val;
+            }
+          }
+
+          previewRows.push({
+            ...(res.id != null ? { id: res.id } : {}),
+            ...(res.recordType != null ? { recordType: res.recordType } : {}),
+            values: rowValues,
+          });
+        }
+      }
+
+      // 6. Save the search when dryRun is false
+      let savedSearchId = null;
+      let resolvedTitle = title || (searchObj.title ? String(searchObj.title) : null);
+      let resolvedScriptId = normalizedScriptId || (searchObj.id ? String(searchObj.id) : null);
+      let resolvedIsPublic =
+        request.isPublic !== undefined ? Boolean(request.isPublic) : Boolean(searchObj.isPublic);
+
+      if (!isDryRun) {
+        if (title) {
+          searchObj.title = title;
+          resolvedTitle = title;
+        }
+        if (normalizedScriptId && !/^\d+$/.test(normalizedScriptId)) {
+          searchObj.id = normalizedScriptId;
+          resolvedScriptId = normalizedScriptId;
+        }
+        if (request.isPublic !== undefined) {
+          searchObj.isPublic = Boolean(request.isPublic);
+          resolvedIsPublic = Boolean(request.isPublic);
+        }
+
+        try {
+          savedSearchId = searchObj.save();
+        } catch (saveErr) {
+          return makeErrorResponse(
+            `Search preview succeeded, but saving the search failed: ${extractFieldsFromErrorMessage(getErrorMessage(saveErr))}`,
+          );
+        }
+      }
+
+      const timeElapsedMS = timer.elapsed;
+      const governanceUsed = startGovernance - script.getRemainingUsage();
+
+      return {
+        success: true,
+        dryRun: isDryRun,
+        operation: operation,
+        existingSearchLoaded: existingLoaded,
+        searchType: searchObj.searchType || searchType || null,
+        ...(savedSearchId != null
+          ? {
+              savedSearchId: savedSearchId,
+              searchResultsUrl: `/app/common/search/searchresults.nl?searchid=${savedSearchId}`,
+            }
+          : {}),
+        ...(resolvedScriptId ? { scriptId: resolvedScriptId } : {}),
+        ...(resolvedTitle ? { title: resolvedTitle } : {}),
+        isPublic: resolvedIsPublic,
+        totalMatchCount: totalMatchCount,
+        previewRowCount: previewRows.length,
+        appliedFilterExpression: searchObj.filterExpression || null,
+        columns: columnMeta,
+        previewRows: previewRows,
+        timeElapsedMS: timeElapsedMS,
+        governanceUsed: governanceUsed,
+      };
+    } catch (e) {
+      return makeErrorResponse(
+        `Unable to ${isDryRun ? "run search dry-run" : "save search"}: ${extractFieldsFromErrorMessage(getErrorMessage(e))}`,
+      );
+    }
+  }
+
   // =========================================================================
   // ACTION DISPATCHER
   // =========================================================================
@@ -1964,6 +2589,7 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
     [MCP_ACTION.RENDER_PDF_TEMPLATE]: handleRenderPdfTemplate,
     [MCP_ACTION.RENDER_EMAIL_TEMPLATE]: handleRenderEmailTemplate,
     [MCP_ACTION.GET_FILE]: handleGetFile,
+    [MCP_ACTION.CREATE_SAVED_SEARCH]: handleCreateSavedSearch,
   };
 
   /**
