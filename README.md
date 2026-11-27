@@ -8,12 +8,13 @@ The NetSuite Model Context Protocol (MCP) Server is a powerful bridge that allow
 
 The server exposes the following MCP tools to interact directly with NetSuite, organized by category:
 
-### 1. Environment & Settings Management
+### 1. Environment, Profile & Toolset Management
 *(Always available, even before `env.json` or `state.json` is initialized)*
 
-- **`netsuite_open_settings`** *(Prompt: `open-settings` — "Open NetSuite Settings")*: Launch a local graphical web interface in your browser to add, edit, or delete NetSuite environments, test OAuth/RESTlet connections, upload SQLite schema databases (`.db`) and trigger LanceDB vector database (`.lance`) rebuilds with live progress, configure per-environment tool permissions (`disableDestructive`, `disableSdf`, and individual tool toggles), and customize global `config.json` defaults. Automatically creates the configuration directory and files on first save.
-- **`netsuite_list_environments`** *(Prompt: `list-environments` — "List NetSuite Environments")*: List all configured NetSuite environments from `env.json` and indicate which environment is currently active.
-- **`netsuite_switch_environment`** *(Prompt: `switch-environment` — "Switch NetSuite Environment", optional `environment` argument)*: Switch the active NetSuite environment by updating (or initializing) `state.json`, re-evaluating environment-specific tool restrictions (`disableDestructive`, `disableSdf`, `disabledTools`), and notifying the MCP client that available tools may have changed.
+- **`netsuite_open_settings`** *(Prompt: `open-settings` — "Open NetSuite Settings")*: Launch a local graphical web interface in your browser to add, edit, or delete NetSuite environments, test OAuth/RESTlet connections, upload SQLite schema databases (`.db`) and trigger LanceDB vector database (`.lance`) rebuilds with live progress, configure per-environment tool profiles (`default`, `developer`, `admin`, etc.) with category toggles and security guardrails (`disableDestructive`, `disableSdf`, `allowDynamicActivation`, `blockedTools`), and customize global `config.json` defaults. Automatically creates the configuration directory and files on first save.
+- **`netsuite_list_environments`** *(Prompt: `list-environments` — "List NetSuite Environments")*: List all configured NetSuite environments and their tool profiles from `env.json`, and indicate which environment, profile, and dynamic session toolsets are currently active.
+- **`netsuite_switch_environment`** *(Prompt: `switch-environment` — "Switch NetSuite Environment / Profile", optional `environment` and `profile` arguments)*: Switch the active NetSuite environment and/or tool profile by updating (or initializing) `state.json`, resetting any temporary session toolset overrides, re-evaluating profile tool restrictions, and notifying the MCP client that available tools may have changed.
+- **`netsuite_manage_toolsets`**: Dynamically activate, deactivate, reset, or list NetSuite tool categories (`categories`: `table_discovery`, `data_operations`, `script_execution`, `sdf_file_deployment`, `script_management`, `custom_objects`, `translations`, `templates`) and/or individual tools (`tools`, e.g., `["netsuite_view_file"]`) in-memory for the current MCP chat session without modifying `env.json`. Allows the server to start with a lean default footprint (`table_discovery` + `data_operations`) and unlock either specific tools or full categories on-demand while strictly respecting the active profile's hard security guardrails (`disableDestructive`, `disableSdf`, `blockedCategories`, and `blockedTools`).
 
 ### 2. Table & Schema Discovery
 *(Powered by the local SQLite `.db` schema database and LanceDB `.lance` vector store, with NetSuite REST Metadata API fallback)*
@@ -151,10 +152,10 @@ The NetSuite MCP Server uses configuration files stored in your operating system
 You do not need to create the configuration folder or edit JSON files by hand. After installing and starting the MCP server, simply ask your AI assistant to **open the NetSuite settings** (which invokes `netsuite_open_settings`).
 
 This launches a local web interface in your browser where you can:
-- **Create, rename, edit, and delete environments** (`env.json`) and set the **active environment** (`state.json`).
+- **Create, rename, edit, and delete environments** (`env.json`) and set the **active environment and tool profile** (`state.json`).
 - **Test connections** directly from the form to verify your OAuth 1.0a credentials and MCP RESTlet deployment before saving.
 - **Load SQLite schema databases & build Vector databases:** Pick any `.db` file exported from `MCPSchemaLoad.html` via a file picker—the UI validates the schema, moves it into the configuration directory, and renames it to `<Environment>.db` automatically. You can also trigger and monitor the `<Environment>.lance` vector database build with a live progress bar right from the settings page.
-- **Manage tool permissions** per environment with top-level switches for `disableDestructive` and `disableSdf`, plus an expandable **Individual Tool Permissions** section grouped by tool category with per-category **Enable All** / **Disable All** actions.
+- **Manage tool profiles & permissions** per environment: Every environment comes with a permanent `default` profile pre-configured with Core categories (`table_discovery` and `data_operations`) and supports creating additional profiles (e.g., `developer`, `admin`, `readonly`) that share the environment's credentials and databases. Each profile has quick-apply presets, hard security guardrails (`disableDestructive`, `disableSdf`, `blockedTools`), a toggle for dynamic on-demand session toolset activation (`allowDynamicActivation`), and category/tool switches.
 - **Customize global & SDF object defaults** (`config.json`) for project build/upload behavior and SDF XML defaults (`RECORD`, `FIELD`, and `LIST`).
 - **Zero-config initialization:** Clicking **Save Changes** automatically creates the configuration directory and writes `env.json`, `state.json`, and `config.json`, then notifies the MCP client that the tool list has updated. *(Note: If your AI client/harness does not immediately reflect newly enabled or disabled tools, toggle the MCP server off and on again.)*
 
@@ -166,7 +167,7 @@ If you prefer to create or edit the configuration files manually in the configur
 
 ### 1. The `state.json` File
 
-The `state.json` file acts as a switch to determine which NetSuite environment you are currently targeting (e.g., Sandbox, Production).
+The `state.json` file acts as a switch to determine which NetSuite environment (e.g., `Sandbox`, `Prod`) and tool profile (e.g., `default`, `developer`) you are currently targeting.
 
 You can create this file manually or let the MCP server initialize and update it using **`netsuite_open_settings`** or **`netsuite_switch_environment`** (if `state.json` does not exist yet, only `netsuite_open_settings`, `netsuite_list_environments`, and `netsuite_switch_environment` will be exposed until an environment is selected).
 
@@ -174,17 +175,25 @@ To create `state.json` manually in the configuration directory, use the followin
 
 ```json
 {
-  "environment": "Prod"
+  "environment": "Sandbox",
+  "profile": "default"
 }
 ```
-*(The value of `"environment"` must match a top-level key defined in your `env.json` file.)*
+*(The value of `"environment"` must match a top-level key defined in your `env.json` file. If `"profile"` is omitted or not found on that environment, it defaults to `"default"`.)*
 
 ### 2. The `env.json` File (⚠️ REQUIRED)
 
-This file stores your NetSuite credentials for one or more environments. You can also optionally configure a `tools` object on any environment to control which MCP tools are available when that environment is active:
-- **`disableDestructive`**: When `true`, disables all tools that can mutate NetSuite data or metadata (e.g., `netsuite_create_record`, `netsuite_run_function`, `netsuite_upload_file`, `netsuite_deploy_script`, `netsuite_create_custom_record`, `netsuite_update_custom_record`, `netsuite_create_custom_list`, `netsuite_create_translation_collection`, `netsuite_update_translation_collection`, `netsuite_upsert_advanced_pdf_template`, `netsuite_upsert_email_template`).
-- **`disableSdf`**: When `true`, disables all tools that require the SuiteCloud Development Framework (SDF) CLI. *(Note: SDF tools are also automatically disabled if `sdfId` is omitted or empty for the environment.)*
-- **`disabledTools`**: An optional array of specific tool names to disable individually.
+This file stores your NetSuite credentials for one or more environments along with a `profiles` map defining one or more tool profiles per environment (`"default"` is always present):
+- **`enabledCategories`**: Array of tool category IDs enabled at session startup for the profile (`"table_discovery"`, `"data_operations"`, `"script_execution"`, `"sdf_file_deployment"`, `"script_management"`, `"custom_objects"`, `"translations"`, `"templates"`). Defaults to `["table_discovery", "data_operations"]` so the server starts with a lean, high-accuracy tool footprint.
+- **`blockedCategories`** *(Hard Guardrail)*: Optional array of category IDs to hard-block completely so none of their tools can be enabled at startup or via dynamic session activation.
+- **`allowDynamicActivation`**: When `true` (default), exposes `netsuite_manage_toolsets` so the AI assistant can temporarily activate additional non-blocked tool categories in-memory for the current chat session as needed.
+- **`disableDestructive`** *(Hard Guardrail)*: When `true` (default `false`), blocks all tools that can mutate NetSuite data or metadata (e.g., `netsuite_create_record`, `netsuite_run_function`, `netsuite_upload_file`, `netsuite_deploy_script`, `netsuite_create_custom_record`, `netsuite_update_custom_record`, `netsuite_create_custom_list`, `netsuite_create_translation_collection`, `netsuite_update_translation_collection`, `netsuite_upsert_advanced_pdf_template`, `netsuite_upsert_email_template`). Cannot be overridden by dynamic session activation.
+- **`disableSdf`** *(Hard Guardrail)*: When `true` (default `false`), blocks all tools that require the SuiteCloud Development Framework (SDF) CLI. Cannot be overridden by dynamic session activation. *(Note: SDF tools are also automatically disabled if `sdfId` is omitted or empty for the environment.)*
+- **`disabledTools`**: Optional array of specific tool names inside enabled categories to keep disabled at startup (defaults to `["netsuite_rebuild_vector_database", "netsuite_rebuild_vector_database_status"]`). Unlike `blockedTools`, these can still be toggled on or dynamically activated.
+- **`enabledTools`**: Optional array of specific tool names to enable at startup even if their parent category is not in `enabledCategories`.
+- **`blockedTools`** *(Hard Guardrail)*: Optional array of specific tool names to hard-block individually (cannot be dynamically activated).
+
+*(Legacy `env.json` files using a top-level `"tools"` object on an environment are automatically migrated to `profiles.default`.)*
 
 Create `env.json` in the configuration directory:
 
@@ -199,12 +208,21 @@ Create `env.json` in the configuration directory:
     "consumerSecret": "YOUR_CONSUMER_SECRET",
     "token": "YOUR_TOKEN",
     "tokenSecret": "YOUR_TOKEN_SECRET",
-    "tools": {
-      "disableDestructive": true,
-      "disableSdf": true,
-      "disabledTools": [
-        "netsuite_rebuild_vector_database"
-      ]
+    "profiles": {
+      "default": {
+        "description": "Read-only production schema and query tools",
+        "disableDestructive": true,
+        "disableSdf": true,
+        "allowDynamicActivation": true,
+        "enabledCategories": [
+          "table_discovery",
+          "data_operations"
+        ],
+        "enabledTools": [],
+        "blockedTools": [
+          "netsuite_rebuild_vector_database"
+        ]
+      }
     }
   },
   "Sandbox": {
@@ -215,7 +233,36 @@ Create `env.json` in the configuration directory:
     "consumerKey": "YOUR_SB_CONSUMER_KEY",
     "consumerSecret": "YOUR_SB_CONSUMER_SECRET",
     "token": "YOUR_SB_TOKEN",
-    "tokenSecret": "YOUR_SB_TOKEN_SECRET"
+    "tokenSecret": "YOUR_SB_TOKEN_SECRET",
+    "profiles": {
+      "default": {
+        "description": "Core schema discovery and data querying tools",
+        "disableDestructive": false,
+        "disableSdf": false,
+        "allowDynamicActivation": true,
+        "enabledCategories": [
+          "table_discovery",
+          "data_operations"
+        ],
+        "enabledTools": [],
+        "blockedTools": []
+      },
+      "developer": {
+        "description": "SuiteScript development, logs, and SDF deployment",
+        "disableDestructive": false,
+        "disableSdf": false,
+        "allowDynamicActivation": true,
+        "enabledCategories": [
+          "table_discovery",
+          "data_operations",
+          "script_execution",
+          "sdf_file_deployment",
+          "script_management"
+        ],
+        "enabledTools": [],
+        "blockedTools": []
+      }
+    }
   }
 }
 ```

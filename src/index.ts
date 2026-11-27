@@ -10,12 +10,15 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { promptsRegistry } from "./prompts/index.js";
 import { toolsRegistry } from "./tools/index.js";
+import { buildManageToolsetsDescription } from "./tools/manageToolsets.js";
 import {
     APP_CONFIG_PATH,
     CONFIG_PATH,
     ENV_PATH,
     EnvironmentConfig,
     MCP_DIR,
+    clearSessionCategories,
+    getActiveStateOrNull,
     getEnvironmentConfig,
     getToolDisableReason
 } from "./utils/config.js";
@@ -56,9 +59,11 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 
 // Register tools to MCP
 server.setRequestHandler(ListToolsRequestSchema, async () => {
+    let environment: string | null = null;
     let config: EnvironmentConfig | null = null;
+    let profileName: string | null = null;
     try {
-        ({ config } = await getEnvironmentConfig());
+        ({ environment, config, profileName } = await getEnvironmentConfig());
     } catch (error: any) {
         console.error(`Warning: Could not load environment config for ListTools: ${error.message}`);
     }
@@ -74,11 +79,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
         tools: toolsRegistry
             .filter(tool => config
-                ? getToolDisableReason(tool, config) === null
+                ? getToolDisableReason(tool, config, profileName) === null
                 : tool.meta.alwaysAvailable === true
             )
             .map(tool => {
                 let inputSchema = tool.inputSchema;
+                let description = tool.description;
+
+                if (tool.name === "netsuite_manage_toolsets") {
+                    description = buildManageToolsetsDescription(
+                        toolsRegistry,
+                        environment,
+                        config,
+                        profileName
+                    );
+                }
 
                 // Dynamically populate the saveToProject property description with the active project's effective default
                 if (
@@ -100,7 +115,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
                 return {
                     name: tool.name,
-                    description: tool.description,
+                    description,
                     inputSchema
                 };
             })
@@ -117,11 +132,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     try {
         if (!requestedTool.meta.alwaysAvailable) {
-            const { environment, config } = await getEnvironmentConfig();
-            const disableReason = getToolDisableReason(requestedTool, config);
+            const { environment, config, profileName } = await getEnvironmentConfig();
+            const disableReason = getToolDisableReason(requestedTool, config, profileName);
             if (disableReason) {
                 return {
-                    content: [{ type: "text", text: `Tool '${requestedTool.name}' is disabled in the '${environment}' environment (${disableReason}).` }],
+                    content: [{
+                        type: "text",
+                        text: `Tool '${requestedTool.name}' is disabled in the '${environment}' environment under profile '${profileName}' (${disableReason}).`
+                    }],
                     isError: true
                 };
             }
@@ -160,6 +178,7 @@ const startConfigWatcher = async (mcpServer: Server): Promise<void> => {
     }
 
     let lastSignature = await computeConfigFilesSignature();
+    let lastActiveState = await getActiveStateOrNull().catch(() => ({ environment: null, profile: "default" }));
     let debounceTimer: NodeJS.Timeout | null = null;
 
     const checkAndNotify = async () => {
@@ -167,6 +186,14 @@ const startConfigWatcher = async (mcpServer: Server): Promise<void> => {
             const currentSignature = await computeConfigFilesSignature();
             if (currentSignature !== lastSignature) {
                 lastSignature = currentSignature;
+                const currentState = await getActiveStateOrNull().catch(() => ({ environment: null, profile: "default" }));
+                if (
+                    currentState.environment !== lastActiveState.environment ||
+                    currentState.profile !== lastActiveState.profile
+                ) {
+                    lastActiveState = currentState;
+                    clearSessionCategories();
+                }
                 await mcpServer.sendToolListChanged();
                 void notifySettingsClientsOfConfigChange();
             }

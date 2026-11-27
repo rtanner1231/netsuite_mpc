@@ -35,11 +35,14 @@ import { renderEmailTemplateTool } from "./renderEmailTemplate.js";
 import { deployScriptTool } from "./deployScript.js";
 import { getScriptTool } from "./getScript.js";
 import { searchScriptsTool } from "./searchScripts.js";
+import { createManageToolsetsTool } from "./manageToolsets.js";
+import { ToolDefinition } from "../types/index.js";
 
-export const toolsRegistry = [
+export const toolsRegistry: ToolDefinition[] = [
     listEnvironmentsTool,
     switchEnvironmentTool,
     openSettingsTool,
+    createManageToolsetsTool(() => toolsRegistry),
     getNetsuiteFieldsTool,
     runSuiteQlTool,
     getScriptLogsTool,

@@ -23,17 +23,157 @@ export interface GlobalSectionSchema {
 export interface ToolCategorySchema {
     id: string;
     title: string;
+    description: string;
 }
 
+export interface ProfilePresetSchema {
+    id: string;
+    title: string;
+    description: string;
+    disableDestructive: boolean;
+    disableSdf: boolean;
+    allowDynamicActivation: boolean;
+    enabledCategories: string[];
+    blockedCategories?: string[];
+    enabledTools?: string[];
+    disabledTools?: string[];
+    blockedTools?: string[];
+}
+
+export const DEFAULT_ENABLED_CATEGORIES: string[] = [
+    "table_discovery",
+    "data_operations"
+];
+
+export const DEFAULT_DISABLED_TOOLS: string[] = [
+    "netsuite_rebuild_vector_database",
+    "netsuite_rebuild_vector_database_status"
+];
+
 export const TOOL_CATEGORIES: ToolCategorySchema[] = [
-    { id: "table_discovery", title: "Table & Schema Discovery" },
-    { id: "data_operations", title: "Data Querying & Record Operations" },
-    { id: "script_execution", title: "Script Execution & Log Inspection" },
-    { id: "sdf_file_deployment", title: "File Cabinet & SDF Files" },
-    { id: "script_management", title: "Script Management" },
-    { id: "custom_objects", title: "Custom Objects (Records & Lists)" },
-    { id: "translations", title: "Translation Collections" },
-    { id: "templates", title: "Templates (Advanced PDF & Email)" }
+    {
+        id: "table_discovery",
+        title: "Table & Schema Discovery",
+        description: "Semantic table search, field metadata inspection, table join relationships, and vector database indexing."
+    },
+    {
+        id: "data_operations",
+        title: "Data Querying & Record Operations",
+        description: "Execute SuiteQL queries, load dynamic record samples, and create NetSuite records."
+    },
+    {
+        id: "script_execution",
+        title: "Script Execution & Log Inspection",
+        description: "Execute exported SuiteScript functions dynamically and inspect script/RESTlet execution logs."
+    },
+    {
+        id: "sdf_file_deployment",
+        title: "File Cabinet & SDF Files",
+        description: "View File Cabinet files, upload script files via SDF, and diff local vs. deployed files."
+    },
+    {
+        id: "script_management",
+        title: "Script Management",
+        description: "Search, inspect, and deploy NetSuite Script records, parameters, and script deployments."
+    },
+    {
+        id: "custom_objects",
+        title: "Custom Objects (Records & Lists)",
+        description: "Create and update NetSuite Custom Record Types, custom fields, and Custom Lists via SDF."
+    },
+    {
+        id: "translations",
+        title: "Translation Collections",
+        description: "Inspect locales and list, view, create, or update NetSuite Translation Collections and XLIFF files."
+    },
+    {
+        id: "templates",
+        title: "Templates (Advanced PDF & Email)",
+        description: "List, read, upsert, and live-render Advanced PDF/HTML Templates and Email Templates."
+    }
+];
+
+export const PROFILE_PRESETS: ProfilePresetSchema[] = [
+    {
+        id: "core",
+        title: "Core (Default)",
+        description: "Everyday schema discovery, SuiteQL querying, and record operations.",
+        disableDestructive: false,
+        disableSdf: false,
+        allowDynamicActivation: true,
+        enabledCategories: ["table_discovery", "data_operations"],
+        disabledTools: [...DEFAULT_DISABLED_TOOLS]
+    },
+    {
+        id: "readonly",
+        title: "Read-Only Analyst",
+        description: "Safe schema exploration and SuiteQL data querying with all destructive and SDF tools locked.",
+        disableDestructive: true,
+        disableSdf: true,
+        allowDynamicActivation: true,
+        enabledCategories: ["table_discovery", "data_operations"],
+        disabledTools: [...DEFAULT_DISABLED_TOOLS]
+    },
+    {
+        id: "developer",
+        title: "SuiteScript Developer",
+        description: "Core data tools plus script execution, logs, File Cabinet operations, and script deployments.",
+        disableDestructive: false,
+        disableSdf: false,
+        allowDynamicActivation: true,
+        enabledCategories: [
+            "table_discovery",
+            "data_operations",
+            "script_execution",
+            "sdf_file_deployment",
+            "script_management"
+        ],
+        disabledTools: [...DEFAULT_DISABLED_TOOLS]
+    },
+    {
+        id: "admin",
+        title: "Admin & Custom Objects",
+        description: "Core data tools plus Custom Record Types, Custom Lists, and Script Management.",
+        disableDestructive: false,
+        disableSdf: false,
+        allowDynamicActivation: true,
+        enabledCategories: [
+            "table_discovery",
+            "data_operations",
+            "custom_objects",
+            "script_management"
+        ],
+        disabledTools: [...DEFAULT_DISABLED_TOOLS]
+    },
+    {
+        id: "templates_localization",
+        title: "Templates & Localization",
+        description: "Core query & sample tools plus Advanced PDF/Email Templates and Translation Collections.",
+        disableDestructive: false,
+        disableSdf: false,
+        allowDynamicActivation: true,
+        enabledCategories: [
+            "table_discovery",
+            "data_operations",
+            "templates",
+            "translations"
+        ],
+        disabledTools: [
+            ...DEFAULT_DISABLED_TOOLS,
+            "netsuite_get_related_tables",
+            "netsuite_create_record"
+        ]
+    },
+    {
+        id: "all",
+        title: "All Tool Categories",
+        description: "Enables all 8 tool categories at once (not recommended for smaller models or crowded agent contexts).",
+        disableDestructive: false,
+        disableSdf: false,
+        allowDynamicActivation: true,
+        enabledCategories: TOOL_CATEGORIES.map(c => c.id),
+        disabledTools: [...DEFAULT_DISABLED_TOOLS]
+    }
 ];
 
 export const TOOL_CATEGORY_BY_NAME: Record<string, string> = {

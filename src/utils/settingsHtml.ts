@@ -449,6 +449,60 @@ export const renderSettingsHtml = (token: string): string => {
             background: var(--accent);
             transition: width 0.25s ease;
         }
+        /* Profile Bar */
+        .profile-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 12px 14px;
+            background: rgba(15, 23, 42, 0.65);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+        .profile-tabs {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .profile-tab {
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            font-size: 0.84rem;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.15s;
+        }
+        .profile-tab:hover {
+            color: var(--text-primary);
+            border-color: #475569;
+        }
+        .profile-tab.selected {
+            background: rgba(59, 130, 246, 0.16);
+            border-color: var(--accent);
+            color: var(--text-primary);
+        }
+        .preset-chips {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+        .preset-label {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            margin-right: 4px;
+        }
         /* Toggles */
         .toggle-row {
             display: flex;
@@ -527,95 +581,198 @@ export const renderSettingsHtml = (token: string): string => {
         input:checked + .slider:before {
             transform: translateX(19px);
         }
-        /* Expandable individual tools */
-        details.tools-collapsible {
-            margin-top: 14px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: rgba(15, 23, 42, 0.35);
-            overflow: hidden;
-        }
-        details.tools-collapsible > summary {
-            padding: 12px 16px;
-            cursor: pointer;
-            font-weight: 500;
-            font-size: 0.9rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            user-select: none;
-            list-style: none;
-        }
-        details.tools-collapsible > summary::-webkit-details-marker {
-            display: none;
-        }
-        .summary-left {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .chevron {
-            transition: transform 0.15s ease;
-            display: inline-block;
-        }
-        details[open] .chevron {
-            transform: rotate(90deg);
-        }
-        .tools-list {
-            padding: 12px 16px 16px;
-            border-top: 1px solid var(--border-color);
+        /* Category cards & expandable individual tools */
+        .categories-grid {
             display: flex;
             flex-direction: column;
-            gap: 14px;
+            gap: 16px;
+            margin-top: 14px;
         }
         .tool-section {
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: rgba(15, 23, 42, 0.4);
+            border: 1px solid #334155;
+            border-left: 4px solid #475569;
+            border-radius: 10px;
+            background: #162032;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
             overflow: hidden;
+            transition: border-color 0.15s ease, background 0.15s ease;
+        }
+        .tool-section.cat-enabled {
+            border-color: rgba(59, 130, 246, 0.45);
+            border-left-color: #10b981;
+            background: #1a273d;
+        }
+        .tool-section.cat-blocked {
+            border-color: rgba(239, 68, 68, 0.4);
+            border-left-color: #ef4444;
+            background: rgba(23, 30, 46, 0.7);
+            opacity: 0.85;
         }
         .tool-section-header {
-            padding: 10px 14px;
-            background: rgba(30, 41, 59, 0.75);
-            border-bottom: 1px solid var(--border-color);
+            padding: 14px 18px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 14px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.12s ease;
+        }
+        .tool-section-header:hover {
+            background: rgba(255, 255, 255, 0.03);
         }
         .tool-section-title-wrap {
             display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            min-width: 240px;
+        }
+        .tool-section-title-line {
+            display: flex;
             align-items: center;
             gap: 10px;
             flex-wrap: wrap;
         }
+        .cat-chevron {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            transition: transform 0.15s ease, color 0.15s ease;
+        }
+        .tool-section.is-open .cat-chevron {
+            transform: rotate(90deg);
+            color: var(--text-primary);
+        }
         .tool-section-title {
-            font-size: 0.88rem;
+            font-size: 0.96rem;
             font-weight: 600;
             color: var(--text-primary);
         }
-        .tool-section-count {
-            font-size: 0.76rem;
+        .count-pill {
+            font-size: 0.73rem;
+            font-weight: 600;
+            padding: 2px 9px;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.65);
+            border: 1px solid rgba(148, 163, 184, 0.25);
             color: var(--text-secondary);
+        }
+        .count-pill.has-active {
+            background: rgba(16, 185, 129, 0.14);
+            border-color: rgba(16, 185, 129, 0.35);
+            color: #6ee7b7;
+        }
+        .tool-section-desc {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            padding-left: 28px;
         }
         .tool-section-actions {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 14px;
+            flex-shrink: 0;
         }
         .tool-section-body {
-            padding: 10px 12px;
-            display: flex;
+            background: #0b1120;
+            border-top: 1px solid rgba(51, 65, 85, 0.75);
+            padding: 4px 0;
+            display: none;
             flex-direction: column;
-            gap: 8px;
         }
-        .tool-section-body .toggle-row {
-            margin-bottom: 0;
+        .tool-section.is-open .tool-section-body {
+            display: flex;
         }
-        .tool-row.locked {
-            opacity: 0.72;
-            background: rgba(15, 23, 42, 0.3);
+        .tool-list-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 10px 18px 10px 44px;
+            border-bottom: 1px solid rgba(51, 65, 85, 0.45);
+            transition: background 0.12s ease;
+        }
+        .tool-list-row:last-child {
+            border-bottom: none;
+        }
+        .tool-list-row:hover {
+            background: rgba(30, 41, 59, 0.45);
+        }
+        .tool-list-row.locked {
+            opacity: 0.62;
+        }
+        .tool-list-row .toggle-desc {
+            font-size: 0.77rem;
+            color: #8295b0;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .row-controls {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-shrink: 0;
+        }
+        .block-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: rgba(15, 23, 42, 0.55);
+            color: var(--text-secondary);
+            font-size: 0.76rem;
+            font-weight: 500;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.15s ease;
+        }
+        .block-pill:hover {
+            border-color: rgba(239, 68, 68, 0.45);
+            color: var(--text-primary);
+        }
+        .block-pill.active {
+            background: var(--danger-bg);
+            border-color: rgba(239, 68, 68, 0.5);
+            color: #fca5a5;
+        }
+        .block-pill.disabled-pill {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .block-pill input[type="checkbox"] {
+            margin: 0;
+            accent-color: var(--danger);
+            cursor: inherit;
+        }
+        .context-warning-box {
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .context-warning-box.optimal {
+            background: var(--success-bg);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            color: #6ee7b7;
+        }
+        .context-warning-box.heavy {
+            background: var(--warning-bg);
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            color: #fcd34d;
         }
         .empty-state {
             text-align: center;
@@ -710,7 +867,7 @@ export const renderSettingsHtml = (token: string): string => {
     </header>
 
     <div class="tabs-bar">
-        <button class="tab-btn active" data-tab="environments" onclick="switchMainTab('environments')">Environments (env.json &amp; state.json)</button>
+        <button class="tab-btn active" data-tab="environments" onclick="switchMainTab('environments')">Environments &amp; Tool Profiles (env.json &amp; state.json)</button>
         <button class="tab-btn" data-tab="global" onclick="switchMainTab('global')">Global &amp; SDF Defaults (config.json)</button>
     </div>
 
@@ -746,19 +903,29 @@ export const renderSettingsHtml = (token: string): string => {
 
     <script>
         const SESSION_TOKEN = ${JSON.stringify(token)};
+        const DEFAULT_PROFILE_NAME = "default";
         let appState = {
             configDir: "",
             activeEnvironment: null,
+            activeProfile: "default",
             environments: {},
             appConfig: {},
             schema: {
                 environmentCredentialFields: [],
                 globalSections: [],
                 toolCategories: [],
+                profilePresets: [],
+                defaultEnabledCategories: ["table_discovery", "data_operations"],
+                defaultDisabledTools: [
+                    "netsuite_rebuild_vector_database",
+                    "netsuite_rebuild_vector_database_status"
+                ],
                 tools: []
             }
         };
         let selectedEnvName = null;
+        let selectedProfileByEnv = {}; // { [envName]: profileName }
+        let openCategoryDetails = new Set(); // tracks which category details are expanded
         let selectedGlobalSectionId = null;
         let isDirty = false;
         let lastConfigVersion = null;
@@ -797,6 +964,72 @@ export const renderSettingsHtml = (token: string): string => {
             });
         }
 
+        function createDefaultProfileObj() {
+            const defCats = Array.isArray(appState.schema?.defaultEnabledCategories)
+                ? [...appState.schema.defaultEnabledCategories]
+                : ["table_discovery", "data_operations"];
+            const defDisabled = Array.isArray(appState.schema?.defaultDisabledTools)
+                ? [...appState.schema.defaultDisabledTools]
+                : ["netsuite_rebuild_vector_database", "netsuite_rebuild_vector_database_status"];
+            return {
+                description: "Core schema discovery and data querying tools",
+                disableDestructive: false,
+                disableSdf: false,
+                allowDynamicActivation: true,
+                enabledCategories: defCats,
+                blockedCategories: [],
+                enabledTools: [],
+                disabledTools: defDisabled,
+                blockedTools: []
+            };
+        }
+
+        function ensureEnvironmentProfiles(env) {
+            if (!env || typeof env !== "object") return;
+            if (!env.profiles || typeof env.profiles !== "object" || Array.isArray(env.profiles)) {
+                env.profiles = {};
+            }
+            if (!env.profiles[DEFAULT_PROFILE_NAME]) {
+                env.profiles[DEFAULT_PROFILE_NAME] = createDefaultProfileObj();
+            }
+            Object.keys(env.profiles).forEach(pName => {
+                const p = env.profiles[pName] || {};
+                p.disableDestructive = Boolean(p.disableDestructive ?? false);
+                p.disableSdf = Boolean(p.disableSdf ?? false);
+                p.allowDynamicActivation = p.allowDynamicActivation !== undefined ? Boolean(p.allowDynamicActivation) : true;
+                if (!Array.isArray(p.enabledCategories)) {
+                    p.enabledCategories = Array.isArray(appState.schema?.defaultEnabledCategories)
+                        ? [...appState.schema.defaultEnabledCategories]
+                        : ["table_discovery", "data_operations"];
+                }
+                if (!Array.isArray(p.blockedCategories)) p.blockedCategories = [];
+                if (!Array.isArray(p.enabledTools)) p.enabledTools = [];
+                if (!Array.isArray(p.disabledTools)) {
+                    p.disabledTools = Array.isArray(appState.schema?.defaultDisabledTools)
+                        ? [...appState.schema.defaultDisabledTools]
+                        : ["netsuite_rebuild_vector_database", "netsuite_rebuild_vector_database_status"];
+                }
+                if (!Array.isArray(p.blockedTools)) p.blockedTools = [];
+                env.profiles[pName] = p;
+            });
+        }
+
+        function getSelectedProfileName(envName) {
+            if (!envName || !appState.environments[envName]) return DEFAULT_PROFILE_NAME;
+            const env = appState.environments[envName];
+            ensureEnvironmentProfiles(env);
+            const currentSel = selectedProfileByEnv[envName];
+            if (currentSel && env.profiles[currentSel]) {
+                return currentSel;
+            }
+            if (envName === appState.activeEnvironment && appState.activeProfile && env.profiles[appState.activeProfile]) {
+                selectedProfileByEnv[envName] = appState.activeProfile;
+                return appState.activeProfile;
+            }
+            selectedProfileByEnv[envName] = DEFAULT_PROFILE_NAME;
+            return DEFAULT_PROFILE_NAME;
+        }
+
         async function loadSettings(preserveSelection = false) {
             try {
                 const res = await fetch("/api/settings?token=" + encodeURIComponent(SESSION_TOKEN));
@@ -805,13 +1038,19 @@ export const renderSettingsHtml = (token: string): string => {
                 }
                 const data = await res.json();
                 const prevSelectedEnv = selectedEnvName;
-                const detailsWasOpen = document.getElementById("individualToolsDetails")?.open;
 
                 appState = data;
+                if (!appState.activeProfile) {
+                    appState.activeProfile = DEFAULT_PROFILE_NAME;
+                }
                 if (data.configVersion) {
                     lastConfigVersion = data.configVersion;
                 }
                 document.getElementById("configDirDisplay").textContent = "Config folder: " + data.configDir;
+
+                Object.keys(appState.environments).forEach(envName => {
+                    ensureEnvironmentProfiles(appState.environments[envName]);
+                });
 
                 const envNames = Object.keys(appState.environments);
                 if (preserveSelection && prevSelectedEnv && appState.environments[prevSelectedEnv]) {
@@ -829,10 +1068,6 @@ export const renderSettingsHtml = (token: string): string => {
                 }
 
                 renderAll();
-                if (detailsWasOpen) {
-                    const d = document.getElementById("individualToolsDetails");
-                    if (d) d.open = true;
-                }
                 markDirty(false);
                 if (selectedEnvName) {
                     void refreshDbStatus(selectedEnvName);
@@ -881,7 +1116,7 @@ export const renderSettingsHtml = (token: string): string => {
                 if (name === appState.activeEnvironment) {
                     const badge = document.createElement("span");
                     badge.className = "badge badge-active";
-                    badge.textContent = "Active";
+                    badge.textContent = "Active (" + (appState.activeProfile || "default") + ")";
                     li.appendChild(badge);
                 }
 
@@ -907,18 +1142,18 @@ export const renderSettingsHtml = (token: string): string => {
                 consumerSecret: "",
                 token: "",
                 tokenSecret: "",
-                tools: {
-                    disableDestructive: false,
-                    disableSdf: false,
-                    disabledTools: []
+                profiles: {
+                    [DEFAULT_PROFILE_NAME]: createDefaultProfileObj()
                 }
             };
 
             if (Object.keys(appState.environments).length === 1 || !appState.activeEnvironment) {
                 appState.activeEnvironment = candidate;
+                appState.activeProfile = DEFAULT_PROFILE_NAME;
             }
 
             selectedEnvName = candidate;
+            selectedProfileByEnv[candidate] = DEFAULT_PROFILE_NAME;
             markDirty(true);
             renderEnvSidebar();
             renderEnvEditor();
@@ -936,10 +1171,12 @@ export const renderSettingsHtml = (token: string): string => {
             }
 
             delete appState.environments[envName];
+            delete selectedProfileByEnv[envName];
             const remaining = Object.keys(appState.environments);
 
             if (isCurrent) {
                 appState.activeEnvironment = null;
+                appState.activeProfile = DEFAULT_PROFILE_NAME;
             }
 
             selectedEnvName = remaining.length > 0 ? remaining[0] : null;
@@ -978,7 +1215,11 @@ export const renderSettingsHtml = (token: string): string => {
             });
             appState.environments = updatedEnvs;
 
-            // Track rename so existing <oldName>.db and <oldName>.lance get renamed on Save
+            if (selectedProfileByEnv[oldName]) {
+                selectedProfileByEnv[newName] = selectedProfileByEnv[oldName];
+                delete selectedProfileByEnv[oldName];
+            }
+
             const existingRename = pendingRenames.find(r => r.to === oldName);
             if (existingRename) {
                 existingRename.to = newName;
@@ -1001,8 +1242,11 @@ export const renderSettingsHtml = (token: string): string => {
             void refreshDbStatus(newName);
         }
 
-        async function setAsActiveEnvironment(envName) {
+        async function setAsActiveEnvironmentAndProfile(envName, profileName) {
+            const targetProf = profileName || getSelectedProfileName(envName) || DEFAULT_PROFILE_NAME;
             appState.activeEnvironment = envName;
+            appState.activeProfile = targetProf;
+            selectedProfileByEnv[envName] = targetProf;
             renderEnvSidebar();
             renderEnvEditor();
 
@@ -1010,7 +1254,7 @@ export const renderSettingsHtml = (token: string): string => {
                 const res = await fetch("/api/active-environment?token=" + encodeURIComponent(SESSION_TOKEN), {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ activeEnvironment: envName })
+                    body: JSON.stringify({ activeEnvironment: envName, activeProfile: targetProf })
                 });
                 const data = await res.json();
                 if (res.ok && data.success) {
@@ -1018,7 +1262,7 @@ export const renderSettingsHtml = (token: string): string => {
                         lastConfigVersion = data.configVersion;
                     }
                     showBanner(
-                        "<strong>Active environment switched to '" + escapeHtml(envName) + "'!</strong> " +
+                        "<strong>Active environment set to '" + escapeHtml(envName) + "' (profile: '" + escapeHtml(targetProf) + "')!</strong> " +
                         "state.json has been updated and your MCP client has been notified to refresh its tool list.",
                         "success"
                     );
@@ -1027,6 +1271,252 @@ export const renderSettingsHtml = (token: string): string => {
                 }
             } catch {
                 markDirty(true);
+            }
+        }
+
+        function selectProfileTab(profileName) {
+            if (!selectedEnvName) return;
+            selectedProfileByEnv[selectedEnvName] = profileName;
+            renderEnvEditor();
+        }
+
+        function addNewProfile() {
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
+            const env = appState.environments[selectedEnvName];
+            ensureEnvironmentProfiles(env);
+
+            const rawName = prompt("Enter a name for the new tool profile (e.g., 'developer', 'admin', 'readonly'):", "developer");
+            if (!rawName) return;
+            const profName = rawName.trim();
+            if (!profName) return;
+
+            if (env.profiles[profName]) {
+                alert("A profile named '" + profName + "' already exists in environment '" + selectedEnvName + "'.");
+                return;
+            }
+
+            // If user named it after a known preset, pre-populate from that preset
+            const presets = appState.schema.profilePresets || [];
+            const matchingPreset = presets.find(p => p.id.toLowerCase() === profName.toLowerCase());
+
+            if (matchingPreset) {
+                const defDisabled = Array.isArray(appState.schema?.defaultDisabledTools)
+                    ? [...appState.schema.defaultDisabledTools]
+                    : ["netsuite_rebuild_vector_database", "netsuite_rebuild_vector_database_status"];
+                env.profiles[profName] = {
+                    description: matchingPreset.description,
+                    disableDestructive: Boolean(matchingPreset.disableDestructive),
+                    disableSdf: Boolean(matchingPreset.disableSdf),
+                    allowDynamicActivation: Boolean(matchingPreset.allowDynamicActivation),
+                    enabledCategories: [...matchingPreset.enabledCategories],
+                    blockedCategories: Array.isArray(matchingPreset.blockedCategories) ? [...matchingPreset.blockedCategories] : [],
+                    enabledTools: Array.isArray(matchingPreset.enabledTools) ? [...matchingPreset.enabledTools] : [],
+                    disabledTools: Array.isArray(matchingPreset.disabledTools) ? [...matchingPreset.disabledTools] : defDisabled,
+                    blockedTools: Array.isArray(matchingPreset.blockedTools) ? [...matchingPreset.blockedTools] : []
+                };
+            } else {
+                env.profiles[profName] = createDefaultProfileObj();
+            }
+
+            selectedProfileByEnv[selectedEnvName] = profName;
+            markDirty(true);
+            renderEnvEditor();
+        }
+
+        function deleteSelectedProfile() {
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
+            const env = appState.environments[selectedEnvName];
+            const profName = getSelectedProfileName(selectedEnvName);
+
+            if (profName === DEFAULT_PROFILE_NAME) {
+                alert("The 'default' profile is permanent and cannot be deleted.");
+                return;
+            }
+
+            if (!confirm("Delete profile '" + profName + "' from environment '" + selectedEnvName + "'?")) {
+                return;
+            }
+
+            delete env.profiles[profName];
+            selectedProfileByEnv[selectedEnvName] = DEFAULT_PROFILE_NAME;
+
+            if (appState.activeEnvironment === selectedEnvName && appState.activeProfile === profName) {
+                appState.activeProfile = DEFAULT_PROFILE_NAME;
+            }
+
+            markDirty(true);
+            renderEnvSidebar();
+            renderEnvEditor();
+        }
+
+        function applyPresetToSelectedProfile(presetId) {
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
+            const env = appState.environments[selectedEnvName];
+            const profName = getSelectedProfileName(selectedEnvName);
+            const prof = env.profiles[profName];
+            if (!prof) return;
+
+            const presets = appState.schema.profilePresets || [];
+            const preset = presets.find(p => p.id === presetId);
+            if (!preset) return;
+
+            const defDisabled = Array.isArray(appState.schema?.defaultDisabledTools)
+                ? [...appState.schema.defaultDisabledTools]
+                : ["netsuite_rebuild_vector_database", "netsuite_rebuild_vector_database_status"];
+
+            prof.description = preset.description;
+            prof.disableDestructive = Boolean(preset.disableDestructive);
+            prof.disableSdf = Boolean(preset.disableSdf);
+            prof.allowDynamicActivation = Boolean(preset.allowDynamicActivation);
+            prof.enabledCategories = [...preset.enabledCategories];
+            prof.blockedCategories = Array.isArray(preset.blockedCategories) ? [...preset.blockedCategories] : [];
+            prof.enabledTools = Array.isArray(preset.enabledTools) ? [...preset.enabledTools] : [];
+            prof.disabledTools = Array.isArray(preset.disabledTools) ? [...preset.disabledTools] : defDisabled;
+            prof.blockedTools = Array.isArray(preset.blockedTools) ? [...preset.blockedTools] : [];
+
+            markDirty(true);
+            renderEnvEditor();
+        }
+
+        function updateProfileDescription(val) {
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
+            const env = appState.environments[selectedEnvName];
+            const profName = getSelectedProfileName(selectedEnvName);
+            if (!env.profiles[profName]) return;
+            env.profiles[profName].description = val;
+            markDirty(true);
+        }
+
+        function updateProfileFlag(flagKey, checked) {
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
+            const env = appState.environments[selectedEnvName];
+            const profName = getSelectedProfileName(selectedEnvName);
+            const prof = env.profiles[profName];
+            if (!prof) return;
+
+            prof[flagKey] = Boolean(checked);
+            markDirty(true);
+            renderEnvEditor();
+        }
+
+        function toggleProfileCategory(categoryId, enabled) {
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
+            const env = appState.environments[selectedEnvName];
+            const profName = getSelectedProfileName(selectedEnvName);
+            const prof = env.profiles[profName];
+            if (!prof) return;
+
+            if (!Array.isArray(prof.enabledCategories)) prof.enabledCategories = [];
+            if (!Array.isArray(prof.blockedCategories)) prof.blockedCategories = [];
+            if (prof.blockedCategories.includes(categoryId)) return;
+
+            const idx = prof.enabledCategories.indexOf(categoryId);
+
+            if (enabled && idx === -1) {
+                prof.enabledCategories.push(categoryId);
+            } else if (!enabled && idx !== -1) {
+                prof.enabledCategories.splice(idx, 1);
+            }
+
+            // Note: We intentionally preserve prof.disabledTools and prof.enabledTools so toggling
+            // a category off and back on never loses per-tool overrides.
+            markDirty(true);
+            renderEnvEditor();
+        }
+
+        function toggleBlockCategory(categoryId, blocked) {
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
+            const env = appState.environments[selectedEnvName];
+            const profName = getSelectedProfileName(selectedEnvName);
+            const prof = env.profiles[profName];
+            if (!prof) return;
+
+            if (!Array.isArray(prof.blockedCategories)) prof.blockedCategories = [];
+            if (!Array.isArray(prof.enabledCategories)) prof.enabledCategories = [];
+
+            const bIdx = prof.blockedCategories.indexOf(categoryId);
+            if (blocked) {
+                if (bIdx === -1) prof.blockedCategories.push(categoryId);
+                prof.enabledCategories = prof.enabledCategories.filter(c => c !== categoryId);
+            } else {
+                if (bIdx !== -1) prof.blockedCategories.splice(bIdx, 1);
+            }
+
+            markDirty(true);
+            renderEnvEditor();
+        }
+
+        function toggleIndividualToolStartup(toolName, categoryId, enabled) {
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
+            const env = appState.environments[selectedEnvName];
+            const profName = getSelectedProfileName(selectedEnvName);
+            const prof = env.profiles[profName];
+            if (!prof) return;
+
+            if (!Array.isArray(prof.enabledCategories)) prof.enabledCategories = [];
+            if (!Array.isArray(prof.enabledTools)) prof.enabledTools = [];
+            if (!Array.isArray(prof.disabledTools)) prof.disabledTools = [];
+
+            const isCatEnabled = prof.enabledCategories.includes(categoryId);
+
+            if (isCatEnabled) {
+                // Category is ON at startup: enabled tools are not in disabledTools; disabled tools are in disabledTools
+                if (enabled) {
+                    prof.disabledTools = prof.disabledTools.filter(t => t !== toolName);
+                } else {
+                    if (!prof.disabledTools.includes(toolName)) {
+                        prof.disabledTools.push(toolName);
+                    }
+                    prof.enabledTools = prof.enabledTools.filter(t => t !== toolName);
+                }
+            } else {
+                // Category is OFF at startup: enabled tools are in enabledTools; disabled tools are not in enabledTools
+                if (enabled) {
+                    if (!prof.enabledTools.includes(toolName)) {
+                        prof.enabledTools.push(toolName);
+                    }
+                    prof.disabledTools = prof.disabledTools.filter(t => t !== toolName);
+                } else {
+                    prof.enabledTools = prof.enabledTools.filter(t => t !== toolName);
+                }
+            }
+
+            markDirty(true);
+            renderEnvEditor();
+        }
+
+        function toggleIndividualToolBlocked(toolName, blocked) {
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
+            const env = appState.environments[selectedEnvName];
+            const profName = getSelectedProfileName(selectedEnvName);
+            const prof = env.profiles[profName];
+            if (!prof) return;
+
+            if (!Array.isArray(prof.blockedTools)) prof.blockedTools = [];
+            if (!Array.isArray(prof.enabledTools)) prof.enabledTools = [];
+
+            if (blocked) {
+                if (!prof.blockedTools.includes(toolName)) {
+                    prof.blockedTools.push(toolName);
+                }
+                prof.enabledTools = prof.enabledTools.filter(t => t !== toolName);
+            } else {
+                prof.blockedTools = prof.blockedTools.filter(t => t !== toolName);
+            }
+
+            markDirty(true);
+            renderEnvEditor();
+        }
+
+        function toggleCategoryDrawer(catId) {
+            if (openCategoryDetails.has(catId)) {
+                openCategoryDetails.delete(catId);
+            } else {
+                openCategoryDetails.add(catId);
+            }
+            const el = document.getElementById("tool_cat_section_" + catId);
+            if (el) {
+                el.classList.toggle("is-open", openCategoryDetails.has(catId));
             }
         }
 
@@ -1108,7 +1598,6 @@ export const renderSettingsHtml = (token: string): string => {
             const isRebuilding = rebuild && rebuild.status === "in_progress";
             const isOutOfDate = st.sqliteExists && st.lanceExists && st.sqliteModifiedAt && st.lanceModifiedAt && (st.sqliteModifiedAt > st.lanceModifiedAt + 2000);
 
-            // SQLite section
             let sqliteBadge = st.sqliteExists
                 ? '<span class="badge badge-active">Loaded</span>'
                 : '<span class="badge badge-warning">Missing</span>';
@@ -1128,7 +1617,6 @@ export const renderSettingsHtml = (token: string): string => {
                 \`;
             }
 
-            // LanceDB section
             let lanceBadge = "";
             if (isRebuilding) {
                 lanceBadge = '<span class="badge badge-override">Building...</span>';
@@ -1295,7 +1783,7 @@ export const renderSettingsHtml = (token: string): string => {
                 container.innerHTML = \`
                     <div class="empty-state">
                         <h3>No Environment Selected</h3>
-                        <p>Create your first NetSuite environment to configure credentials, schema databases, and tool permissions. When you click Save Changes, the config folder and JSON files will be created automatically.</p>
+                        <p>Create your first NetSuite environment to configure credentials, schema databases, and tool profiles. When you click Save Changes, the config folder and JSON files will be created automatically.</p>
                         <button class="btn btn-primary" onclick="addNewEnvironment()">+ Create Environment</button>
                     </div>
                 \`;
@@ -1303,14 +1791,13 @@ export const renderSettingsHtml = (token: string): string => {
             }
 
             const env = appState.environments[selectedEnvName];
-            if (!env.tools || typeof env.tools !== "object") {
-                env.tools = {};
-            }
-            if (!Array.isArray(env.tools.disabledTools)) {
-                env.tools.disabledTools = [];
-            }
+            ensureEnvironmentProfiles(env);
 
-            const isActive = selectedEnvName === appState.activeEnvironment;
+            const selectedProfileName = getSelectedProfileName(selectedEnvName);
+            const activeProf = env.profiles[selectedProfileName] || env.profiles[DEFAULT_PROFILE_NAME];
+
+            const isEnvActive = selectedEnvName === appState.activeEnvironment;
+            const isProfileActive = isEnvActive && (appState.activeProfile || DEFAULT_PROFILE_NAME) === selectedProfileName;
             const sdfIdMissing = !env.sdfId || String(env.sdfId).trim() === "";
 
             let credsHtml = "";
@@ -1338,28 +1825,57 @@ export const renderSettingsHtml = (token: string): string => {
                 \`;
             });
 
-            // Build individual tools list grouped by category
+            // Profile selector tabs
+            const profileNames = Object.keys(env.profiles);
+            let profileTabsHtml = "";
+            profileNames.forEach(pName => {
+                const isSelected = pName === selectedProfileName;
+                const isThisActive = isEnvActive && (appState.activeProfile || DEFAULT_PROFILE_NAME) === pName;
+                profileTabsHtml += \`
+                    <button
+                        type="button"
+                        class="profile-tab \${isSelected ? 'selected' : ''}"
+                        onclick="selectProfileTab('\${escapeHtml(pName)}')"
+                    >
+                        <span>\${escapeHtml(pName)}</span>
+                        \${isThisActive ? '<span class="badge badge-active" style="font-size:0.62rem; padding:1px 6px;">Active</span>' : ''}
+                    </button>
+                \`;
+            });
+
+            // Preset buttons
+            const presets = Array.isArray(appState.schema.profilePresets) ? appState.schema.profilePresets : [];
+            const presetsHtml = presets.map(preset => \`
+                <button
+                    type="button"
+                    class="btn btn-sm"
+                    onclick="applyPresetToSelectedProfile('\${escapeHtml(preset.id)}')"
+                    title="\${escapeHtml(preset.description)}"
+                >\${escapeHtml(preset.title)}</button>
+            \`).join("");
+
+            // Build categories & tools sections
             const selectableTools = appState.schema.tools || [];
             const definedCategories = Array.isArray(appState.schema.toolCategories) && appState.schema.toolCategories.length > 0
                 ? appState.schema.toolCategories
                 : [
-                    { id: "table_discovery", title: "Table & Schema Discovery" },
-                    { id: "data_operations", title: "Data Querying & Record Operations" },
-                    { id: "script_execution", title: "Script Execution & Log Inspection" },
-                    { id: "sdf_file_deployment", title: "File Cabinet & SDF Files" },
-                    { id: "script_management", title: "Script Management" },
-                    { id: "custom_objects", title: "Custom Objects (Records & Lists)" },
-                    { id: "translations", title: "Translation Collections" },
-                    { id: "templates", title: "Templates (Advanced PDF & Email)" }
+                    { id: "table_discovery", title: "Table & Schema Discovery", description: "" },
+                    { id: "data_operations", title: "Data Querying & Record Operations", description: "" },
+                    { id: "script_execution", title: "Script Execution & Log Inspection", description: "" },
+                    { id: "sdf_file_deployment", title: "File Cabinet & SDF Files", description: "" },
+                    { id: "script_management", title: "Script Management", description: "" },
+                    { id: "custom_objects", title: "Custom Objects (Records & Lists)", description: "" },
+                    { id: "translations", title: "Translation Collections", description: "" },
+                    { id: "templates", title: "Templates (Advanced PDF & Email)", description: "" }
                 ];
 
             const categoryList = [...definedCategories];
             const knownCategoryIds = new Set(categoryList.map(c => c.id));
             if (selectableTools.some(t => !t.category || !knownCategoryIds.has(t.category))) {
-                categoryList.push({ id: "other", title: "Other Tools" });
+                categoryList.push({ id: "other", title: "Other Tools", description: "" });
             }
 
-            let individualDisabledCount = 0;
+            let totalBaselineEnabledCount = 0;
             let toolsSectionsHtml = "";
 
             categoryList.forEach(cat => {
@@ -1372,93 +1888,156 @@ export const renderSettingsHtml = (token: string): string => {
                     return;
                 }
 
+                const isCategoryBlocked = Array.isArray(activeProf.blockedCategories) && activeProf.blockedCategories.includes(cat.id);
+                const isCategoryEnabled = !isCategoryBlocked && Array.isArray(activeProf.enabledCategories) && activeProf.enabledCategories.includes(cat.id);
                 let sectionEnabledCount = 0;
-                let sectionUnlockedCount = 0;
-                let sectionUnlockedDisabledCount = 0;
+                let sectionBlockedCount = 0;
+                let sectionDisabledInEnabledCatCount = 0;
                 let sectionRowsHtml = "";
 
                 sectionTools.forEach(tool => {
-                    const lockedByDestructive = tool.isDestructive && env.tools.disableDestructive === true;
-                    const lockedBySdfSetting = tool.requiresSdf && env.tools.disableSdf === true;
+                    const lockedByDestructive = tool.isDestructive && activeProf.disableDestructive === true;
+                    const lockedBySdfSetting = tool.requiresSdf && activeProf.disableSdf === true;
                     const lockedByMissingSdfId = tool.requiresSdf && sdfIdMissing;
-                    const isLocked = lockedByDestructive || lockedBySdfSetting || lockedByMissingSdfId;
+                    const isHardGuardrailLocked = isCategoryBlocked || lockedByDestructive || lockedBySdfSetting || lockedByMissingSdfId;
 
-                    const isIndividuallyDisabled = env.tools.disabledTools.includes(tool.name);
-                    if (isIndividuallyDisabled || isLocked) {
-                        individualDisabledCount++;
-                    }
+                    const isExplicitlyBlocked = Array.isArray(activeProf.blockedTools) && activeProf.blockedTools.includes(tool.name);
+                    const isExplicitlyEnabled = Array.isArray(activeProf.enabledTools) && activeProf.enabledTools.includes(tool.name);
+                    const isExplicitlyDisabled = Array.isArray(activeProf.disabledTools) && activeProf.disabledTools.includes(tool.name);
 
-                    if (!isLocked) {
-                        sectionUnlockedCount++;
-                        if (isIndividuallyDisabled) {
-                            sectionUnlockedDisabledCount++;
-                        }
+                    if (isExplicitlyBlocked || isHardGuardrailLocked) {
+                        sectionBlockedCount++;
+                    } else if (isCategoryEnabled && isExplicitlyDisabled) {
+                        sectionDisabledInEnabledCatCount++;
                     }
 
                     let lockReasons = [];
+                    if (isCategoryBlocked) {
+                        lockReasons.push("Locked because entire category is Blocked");
+                    }
                     if (lockedByDestructive) {
-                        lockReasons.push("Disabled by 'Disable Destructive Tools' setting");
+                        lockReasons.push("Locked by 'Disable Destructive Tools' guardrail");
                     }
                     if (lockedBySdfSetting) {
-                        lockReasons.push("Disabled by 'Disable SDF Tools' setting");
+                        lockReasons.push("Locked by 'Disable SDF Tools' guardrail");
                     } else if (lockedByMissingSdfId) {
-                        lockReasons.push("Disabled because 'SDF Auth ID (sdfId)' is not configured");
+                        lockReasons.push("Locked because 'SDF Auth ID (sdfId)' is not configured");
+                    }
+                    if (isExplicitlyBlocked) {
+                        lockReasons.push("Hard-blocked in blockedTools (cannot be dynamically activated)");
                     }
 
-                    const isEnabled = !isLocked && !isIndividuallyDisabled;
-                    if (isEnabled) {
+                    const isEffectiveBaselineEnabled =
+                        !isHardGuardrailLocked &&
+                        !isExplicitlyBlocked &&
+                        (isCategoryEnabled ? !isExplicitlyDisabled : isExplicitlyEnabled);
+
+                    if (isEffectiveBaselineEnabled) {
                         sectionEnabledCount++;
+                        totalBaselineEnabledCount++;
                     }
+
+                    const isToggleLocked = isHardGuardrailLocked || isExplicitlyBlocked;
 
                     sectionRowsHtml += \`
-                        <div class="toggle-row tool-row \${isLocked ? 'locked' : ''}">
+                        <div class="tool-list-row \${isToggleLocked ? 'locked' : ''}">
                             <div class="toggle-info">
                                 <div class="toggle-title">
                                     <code>\${escapeHtml(tool.name)}</code>
                                     \${tool.isDestructive ? '<span class="badge badge-destructive">Destructive</span>' : ''}
                                     \${tool.requiresSdf ? '<span class="badge badge-sdf">Requires SDF</span>' : ''}
+                                    \${(!isToggleLocked && ((isCategoryEnabled && isExplicitlyDisabled) || (!isCategoryEnabled && isExplicitlyEnabled)))
+                                        ? '<span class="badge badge-override">Custom</span>'
+                                        : ''
+                                    }
                                 </div>
-                                <div class="toggle-desc">\${escapeHtml(tool.description)}</div>
-                                \${lockReasons.length > 0 ? \`<div class="toggle-note">⚠️ \${escapeHtml(lockReasons.join(" & "))}</div>\` : ''}
+                                <div class="toggle-desc" title="\${escapeHtml(tool.description)}">\${escapeHtml(tool.description)}</div>
+                                \${lockReasons.length > 0 ? \`<div class="toggle-note">⚠️ \${escapeHtml(lockReasons.join(" • "))}</div>\` : ''}
                             </div>
-                            <label class="switch" title="\${isLocked ? escapeHtml(lockReasons.join(', ')) : 'Toggle tool availability'}">
-                                <input
-                                    type="checkbox"
-                                    \${isEnabled ? "checked" : ""}
-                                    \${isLocked ? "disabled" : ""}
-                                    onchange="toggleIndividualTool('\${tool.name}', this.checked)"
-                                />
-                                <span class="slider"></span>
-                            </label>
+                            <div class="row-controls">
+                                <label
+                                    class="block-pill \${isExplicitlyBlocked ? 'active' : ''} \${isCategoryBlocked ? 'disabled-pill' : ''}"
+                                    title="Hard-block this tool so it is never enabled at startup or via dynamic session activation"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        \${isExplicitlyBlocked ? "checked" : ""}
+                                        \${isCategoryBlocked ? "disabled" : ""}
+                                        onchange="toggleIndividualToolBlocked('\${tool.name}', this.checked)"
+                                    />
+                                    <span>Block</span>
+                                </label>
+                                <label
+                                    class="switch"
+                                    title="\${isToggleLocked ? escapeHtml(lockReasons.join(', ')) : 'Toggle whether this tool is enabled at session startup'}"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        \${isEffectiveBaselineEnabled ? "checked" : ""}
+                                        \${isToggleLocked ? "disabled" : ""}
+                                        onchange="toggleIndividualToolStartup('\${tool.name}', '\${escapeHtml(cat.id)}', this.checked)"
+                                    />
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
                         </div>
                     \`;
                 });
 
-                const canTurnAllOn = sectionUnlockedCount > 0 && sectionUnlockedDisabledCount > 0;
-                const canTurnAllOff = sectionEnabledCount > 0;
+                const isDetailsOpen = openCategoryDetails.has(cat.id);
+                let catBadgeHtml = "";
+                if (isCategoryBlocked) {
+                    catBadgeHtml = '<span class="badge badge-destructive">Blocked</span>';
+                } else if (!isCategoryEnabled && activeProf.allowDynamicActivation !== false && sectionEnabledCount === 0) {
+                    catBadgeHtml = '<span class="badge badge-override">On-Demand</span>';
+                }
 
                 toolsSectionsHtml += \`
-                    <div class="tool-section">
-                        <div class="tool-section-header">
+                    <div
+                        id="tool_cat_section_\${escapeHtml(cat.id)}"
+                        class="tool-section \${isCategoryBlocked ? 'cat-blocked' : (isCategoryEnabled ? 'cat-enabled' : '')} \${isDetailsOpen ? 'is-open' : ''}"
+                    >
+                        <div
+                            class="tool-section-header"
+                            onclick="toggleCategoryDrawer('\${escapeHtml(cat.id)}')"
+                            title="Click to expand or collapse individual tools in \${escapeHtml(cat.title)}"
+                        >
                             <div class="tool-section-title-wrap">
-                                <span class="tool-section-title">\${escapeHtml(cat.title)}</span>
-                                <span class="tool-section-count">\${sectionEnabledCount} of \${sectionTools.length} enabled</span>
+                                <div class="tool-section-title-line">
+                                    <span class="cat-chevron">▶</span>
+                                    <span class="tool-section-title">\${escapeHtml(cat.title)}</span>
+                                    <span class="count-pill \${sectionEnabledCount > 0 ? 'has-active' : ''}">
+                                        \${sectionEnabledCount} / \${sectionTools.length} active
+                                    </span>
+                                    \${catBadgeHtml}
+                                    \${sectionBlockedCount > 0 && !isCategoryBlocked ? \`<span class="badge badge-destructive">\${sectionBlockedCount} blocked</span>\` : ''}
+                                </div>
+                                \${cat.description ? \`<div class="tool-section-desc">\${escapeHtml(cat.description)}</div>\` : ''}
                             </div>
-                            <div class="tool-section-actions">
-                                <button
-                                    type="button"
-                                    class="btn btn-sm"
-                                    \${canTurnAllOn ? "" : "disabled"}
-                                    onclick="toggleToolCategory('\${escapeHtml(cat.id)}', true)"
-                                    title="Enable all available tools in this section"
-                                >All On</button>
-                                <button
-                                    type="button"
-                                    class="btn btn-sm"
-                                    \${canTurnAllOff ? "" : "disabled"}
-                                    onclick="toggleToolCategory('\${escapeHtml(cat.id)}', false)"
-                                    title="Disable all tools in this section"
-                                >All Off</button>
+                            <div class="tool-section-actions" onclick="event.stopPropagation()">
+                                <label
+                                    class="block-pill \${isCategoryBlocked ? 'active' : ''}"
+                                    title="Hard-block this entire category so none of its tools can be enabled at startup or via dynamic session activation"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        \${isCategoryBlocked ? "checked" : ""}
+                                        onchange="toggleBlockCategory('\${escapeHtml(cat.id)}', this.checked)"
+                                    />
+                                    <span>Block</span>
+                                </label>
+                                <label
+                                    class="switch"
+                                    title="\${isCategoryBlocked ? 'Unblock category first to enable it at startup' : 'Toggle whether this category is enabled at session startup'}"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        \${isCategoryEnabled ? "checked" : ""}
+                                        \${isCategoryBlocked ? "disabled" : ""}
+                                        onchange="toggleProfileCategory('\${escapeHtml(cat.id)}', this.checked)"
+                                    />
+                                    <span class="slider"></span>
+                                </label>
                             </div>
                         </div>
                         <div class="tool-section-body">
@@ -1468,7 +2047,10 @@ export const renderSettingsHtml = (token: string): string => {
                 \`;
             });
 
-            const enabledToolsCount = selectableTools.length - individualDisabledCount;
+            // System tools count: list_environments, switch_environment, open_settings (+ manage_toolsets when dynamic activation is on)
+            const systemToolsCount = activeProf.allowDynamicActivation !== false ? 4 : 3;
+            const totalInitialTools = totalBaselineEnabledCount + systemToolsCount;
+            const isHeavyContext = totalInitialTools > 20;
 
             container.innerHTML = \`
                 <div class="card">
@@ -1478,9 +2060,9 @@ export const renderSettingsHtml = (token: string): string => {
                             <p>Configure NetSuite OAuth 1.0a credentials, RESTlet endpoints, and SuiteCloud CLI Auth ID.</p>
                         </div>
                         <div style="display:flex; gap:8px; align-items:center;">
-                            \${isActive
-                                ? '<span class="badge badge-active" style="padding:6px 12px; font-size:0.78rem;">✓ Current Active Environment</span>'
-                                : \`<button class="btn btn-sm" onclick="setAsActiveEnvironment('\${escapeHtml(selectedEnvName)}')">Set as Active Environment</button>\`
+                            \${isEnvActive
+                                ? \`<span class="badge badge-active" style="padding:6px 12px; font-size:0.78rem;">✓ Active Environment (\${escapeHtml(appState.activeProfile || 'default')})</span>\`
+                                : \`<button class="btn btn-sm" onclick="setAsActiveEnvironmentAndProfile('\${escapeHtml(selectedEnvName)}', '\${escapeHtml(selectedProfileName)}')">Set as Active Environment</button>\`
                             }
                             <button class="btn btn-sm btn-danger" onclick="deleteEnvironment('\${escapeHtml(selectedEnvName)}')">Delete Environment</button>
                         </div>
@@ -1514,7 +2096,7 @@ export const renderSettingsHtml = (token: string): string => {
                     <div class="card-header">
                         <div>
                             <h3>Schema &amp; Vector Database</h3>
-                            <p>Load the exported NetSuite SQLite schema database (<code>\${escapeHtml(selectedEnvName)}.db</code>) and build the LanceDB vector index (<code>\${escapeHtml(selectedEnvName)}.lance</code>).</p>
+                            <p>Load the exported NetSuite SQLite schema database (<code>\${escapeHtml(selectedEnvName)}.db</code>) and build the LanceDB vector index (<code>\${escapeHtml(selectedEnvName)}.lance</code>) shared across all profiles in this environment.</p>
                         </div>
                     </div>
                     <div id="dbStatusCardBody"></div>
@@ -1523,24 +2105,91 @@ export const renderSettingsHtml = (token: string): string => {
                 <div class="card">
                     <div class="card-header">
                         <div>
-                            <h3>Tool Permissions &amp; Restrictions</h3>
-                            <p>Control which tools are exposed to the AI assistant when <strong>\${escapeHtml(selectedEnvName)}</strong> is active.</p>
+                            <h3>Tool Profiles &amp; Permissions</h3>
+                            <p>Create lightweight tool profiles for <strong>\${escapeHtml(selectedEnvName)}</strong> (e.g., <code>default</code>, <code>developer</code>, <code>admin</code>) that share credentials and databases while keeping agent context lean.</p>
                         </div>
+                    </div>
+
+                    <div class="profile-bar">
+                        <div class="profile-tabs">
+                            <span style="font-size:0.8rem; color:var(--text-secondary); margin-right:4px;">Profiles:</span>
+                            \${profileTabsHtml}
+                            <button type="button" class="btn btn-sm" onclick="addNewProfile()">+ Add Profile</button>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            \${isProfileActive
+                                ? '<span class="badge badge-active" style="padding:5px 10px;">✓ Active Profile</span>'
+                                : \`<button type="button" class="btn btn-sm btn-primary" onclick="setAsActiveEnvironmentAndProfile('\${escapeHtml(selectedEnvName)}', '\${escapeHtml(selectedProfileName)}')">Activate '\${escapeHtml(selectedProfileName)}' Now</button>\`
+                            }
+                            \${selectedProfileName !== DEFAULT_PROFILE_NAME
+                                ? \`<button type="button" class="btn btn-sm btn-danger" onclick="deleteSelectedProfile()">Delete Profile</button>\`
+                                : ''
+                            }
+                        </div>
+                    </div>
+
+                    <div class="form-grid" style="margin-bottom: 16px;">
+                        <div class="form-field">
+                            <label for="profile_desc_input">Profile Description (<code>\${escapeHtml(selectedProfileName)}</code>)</label>
+                            <input
+                                type="text"
+                                id="profile_desc_input"
+                                value="\${escapeHtml(activeProf.description || '')}"
+                                placeholder="e.g., Core schema discovery and data querying tools"
+                                oninput="updateProfileDescription(this.value)"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="preset-chips">
+                        <span class="preset-label">Quick Apply Preset to <strong>\${escapeHtml(selectedProfileName)}</strong>:</span>
+                        \${presetsHtml}
+                    </div>
+
+                    <div class="context-warning-box \${isHeavyContext ? 'heavy' : 'optimal'}">
+                        <div>
+                            <strong>\${totalInitialTools} tools enabled at session startup</strong>
+                            (\${totalBaselineEnabledCount} domain tools + \${systemToolsCount} system tools).
+                            \${isHeavyContext
+                                ? " ⚠️ Having more than ~20 tools enabled simultaneously can increase token usage and degrade agent tool-selection accuracy. Consider disabling specialized categories and relying on Dynamic Toolset Activation."
+                                : " ✓ Lightweight startup footprint for optimal agent accuracy and speed."
+                            }
+                        </div>
+                    </div>
+
+                    <h4 style="margin: 16px 0 10px; font-size: 0.92rem; color: var(--text-primary);">Hard Security Guardrails &amp; Dynamic Activation</h4>
+
+                    <div class="toggle-row">
+                        <div class="toggle-info">
+                            <div class="toggle-title">
+                                <span>Allow Dynamic Session Toolset Activation (<code>allowDynamicActivation</code>)</span>
+                                <span class="badge badge-override">Context Saver</span>
+                            </div>
+                            <div class="toggle-desc">When enabled, exposes <code>netsuite_manage_toolsets</code> so the AI assistant can temporarily activate inactive tool categories on-demand for the current chat session. Never bypasses <code>disableDestructive</code>, <code>disableSdf</code>, or <code>blockedTools</code>.</div>
+                        </div>
+                        <label class="switch">
+                            <input
+                                type="checkbox"
+                                \${activeProf.allowDynamicActivation !== false ? "checked" : ""}
+                                onchange="updateProfileFlag('allowDynamicActivation', this.checked)"
+                            />
+                            <span class="slider"></span>
+                        </label>
                     </div>
 
                     <div class="toggle-row">
                         <div class="toggle-info">
                             <div class="toggle-title">
                                 <span>Disable Destructive Tools (<code>disableDestructive</code>)</span>
-                                <span class="badge badge-destructive">Destructive</span>
+                                <span class="badge badge-destructive">Hard Guardrail</span>
                             </div>
-                            <div class="toggle-desc">When enabled, blocks all tools that create/modify records, upload files, deploy SDF objects, or run server-side functions. Recommended for Production.</div>
+                            <div class="toggle-desc">Hard-blocks all tools that create/modify records, upload files, deploy SDF objects, or run server-side functions. Cannot be overridden dynamically. Recommended for Production.</div>
                         </div>
                         <label class="switch">
                             <input
                                 type="checkbox"
-                                \${env.tools.disableDestructive === true ? "checked" : ""}
-                                onchange="updateEnvToolFlag('disableDestructive', this.checked)"
+                                \${activeProf.disableDestructive === true ? "checked" : ""}
+                                onchange="updateProfileFlag('disableDestructive', this.checked)"
                             />
                             <span class="slider danger-on"></span>
                         </label>
@@ -1550,38 +2199,29 @@ export const renderSettingsHtml = (token: string): string => {
                         <div class="toggle-info">
                             <div class="toggle-title">
                                 <span>Disable SDF Tools (<code>disableSdf</code>)</span>
-                                <span class="badge badge-sdf">Requires SDF</span>
+                                <span class="badge badge-sdf">Hard Guardrail</span>
                             </div>
-                            <div class="toggle-desc">When enabled, blocks all SuiteCloud Development Framework (SDF) deployment and file upload tools.</div>
+                            <div class="toggle-desc">Hard-blocks all SuiteCloud Development Framework (SDF) deployment and file upload tools. Cannot be overridden dynamically.</div>
                             \${sdfIdMissing ? '<div class="toggle-note">ℹ️ Note: SDF Auth ID (sdfId) is currently blank, so SDF tools are automatically disabled.</div>' : ''}
                         </div>
                         <label class="switch">
                             <input
                                 type="checkbox"
-                                \${env.tools.disableSdf === true ? "checked" : ""}
-                                onchange="updateEnvToolFlag('disableSdf', this.checked)"
+                                \${activeProf.disableSdf === true ? "checked" : ""}
+                                onchange="updateProfileFlag('disableSdf', this.checked)"
                             />
                             <span class="slider danger-on"></span>
                         </label>
                     </div>
 
-                    <details class="tools-collapsible" id="individualToolsDetails">
-                        <summary>
-                            <span class="summary-left">
-                                <span class="chevron">▶</span>
-                                <span>Individual Tool Permissions</span>
-                            </span>
-                            <span style="font-size:0.8rem; color:var(--text-secondary);">
-                                \${enabledToolsCount} of \${selectableTools.length} tools enabled
-                            </span>
-                        </summary>
-                        <div class="tools-list">
-                            <div class="help-text" style="margin-bottom: 2px;">
-                                System tools (<code>netsuite_list_environments</code>, <code>netsuite_switch_environment</code>, <code>netsuite_open_settings</code>) are always available and cannot be disabled.
-                            </div>
-                            \${toolsSectionsHtml}
-                        </div>
-                    </details>
+                    <h4 style="margin: 20px 0 8px; font-size: 0.92rem; color: var(--text-primary);">Tool Categories (<code>enabledCategories</code>) &amp; Individual Tool Overrides</h4>
+                    <div class="help-text" style="margin-bottom: 10px;">
+                        Toggle which categories are loaded at startup for the <strong>\${escapeHtml(selectedProfileName)}</strong> profile, or check <strong>Block Category</strong> to hard-block an entire category. Expand any category to toggle individual tools on/off at startup (<code>disabledTools</code> / <code>enabledTools</code>) or hard-block individual tools (<code>blockedTools</code>).
+                    </div>
+
+                    <div class="categories-grid">
+                        \${toolsSectionsHtml}
+                    </div>
                 </div>
             \`;
 
@@ -1609,13 +2249,8 @@ export const renderSettingsHtml = (token: string): string => {
             if (key === "sdfId") {
                 const nowSdfEmpty = !value || String(value).trim() === "";
                 if (prevSdfEmpty !== nowSdfEmpty) {
-                    const detailsWasOpen = document.getElementById("individualToolsDetails")?.open;
                     const cursorPos = document.getElementById("env_field_sdfId")?.selectionStart;
                     renderEnvEditor();
-                    if (detailsWasOpen) {
-                        const d = document.getElementById("individualToolsDetails");
-                        if (d) d.open = true;
-                    }
                     const input = document.getElementById("env_field_sdfId");
                     if (input) {
                         input.focus();
@@ -1624,98 +2259,6 @@ export const renderSettingsHtml = (token: string): string => {
                         }
                     }
                 }
-            }
-        }
-
-        function updateEnvToolFlag(flagKey, checked) {
-            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
-            const env = appState.environments[selectedEnvName];
-            if (!env.tools) env.tools = {};
-            env.tools[flagKey] = checked;
-            markDirty(true);
-
-            const detailsWasOpen = document.getElementById("individualToolsDetails")?.open;
-            renderEnvEditor();
-            if (detailsWasOpen) {
-                const d = document.getElementById("individualToolsDetails");
-                if (d) d.open = true;
-            }
-        }
-
-        function toggleIndividualTool(toolName, enabled) {
-            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
-            const env = appState.environments[selectedEnvName];
-            if (!env.tools) env.tools = {};
-            if (!Array.isArray(env.tools.disabledTools)) env.tools.disabledTools = [];
-
-            const idx = env.tools.disabledTools.indexOf(toolName);
-            if (!enabled && idx === -1) {
-                env.tools.disabledTools.push(toolName);
-            } else if (enabled && idx !== -1) {
-                env.tools.disabledTools.splice(idx, 1);
-            }
-            markDirty(true);
-
-            const detailsWasOpen = document.getElementById("individualToolsDetails")?.open;
-            renderEnvEditor();
-            if (detailsWasOpen) {
-                const d = document.getElementById("individualToolsDetails");
-                if (d) d.open = true;
-            }
-        }
-
-        function toggleToolCategory(categoryId, enableAll) {
-            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
-            const env = appState.environments[selectedEnvName];
-            if (!env.tools) env.tools = {};
-            if (!Array.isArray(env.tools.disabledTools)) env.tools.disabledTools = [];
-
-            const sdfIdMissing = !env.sdfId || String(env.sdfId).trim() === "";
-            const selectableTools = appState.schema.tools || [];
-            const definedCategories = Array.isArray(appState.schema.toolCategories) && appState.schema.toolCategories.length > 0
-                ? appState.schema.toolCategories
-                : [
-                    { id: "table_discovery" },
-                    { id: "data_operations" },
-                    { id: "script_execution" },
-                    { id: "sdf_file_deployment" },
-                    { id: "script_management" },
-                    { id: "custom_objects" },
-                    { id: "translations" },
-                    { id: "templates" }
-                ];
-            const knownCategoryIds = new Set(definedCategories.map(c => c.id));
-
-            const sectionTools = selectableTools.filter(t => {
-                const toolCat = (t.category && knownCategoryIds.has(t.category)) ? t.category : "other";
-                return toolCat === categoryId;
-            });
-
-            sectionTools.forEach(tool => {
-                const lockedByDestructive = tool.isDestructive && env.tools.disableDestructive === true;
-                const lockedBySdfSetting = tool.requiresSdf && env.tools.disableSdf === true;
-                const lockedByMissingSdfId = tool.requiresSdf && sdfIdMissing;
-                const isLocked = lockedByDestructive || lockedBySdfSetting || lockedByMissingSdfId;
-
-                const idx = env.tools.disabledTools.indexOf(tool.name);
-                if (enableAll) {
-                    if (!isLocked && idx !== -1) {
-                        env.tools.disabledTools.splice(idx, 1);
-                    }
-                } else {
-                    if (!isLocked && idx === -1) {
-                        env.tools.disabledTools.push(tool.name);
-                    }
-                }
-            });
-
-            markDirty(true);
-
-            const detailsWasOpen = document.getElementById("individualToolsDetails")?.open;
-            renderEnvEditor();
-            if (detailsWasOpen) {
-                const d = document.getElementById("individualToolsDetails");
-                if (d) d.open = true;
             }
         }
 
@@ -1929,6 +2472,7 @@ export const renderSettingsHtml = (token: string): string => {
             try {
                 const payload = {
                     activeEnvironment: appState.activeEnvironment,
+                    activeProfile: appState.activeProfile || DEFAULT_PROFILE_NAME,
                     environments: appState.environments,
                     appConfig: appState.appConfig,
                     renamedEnvironments: pendingRenames
@@ -1986,15 +2530,19 @@ export const renderSettingsHtml = (token: string): string => {
 
             if (!isDirty) {
                 void loadSettings(true);
-            } else if (data.activeEnvironment !== undefined && data.activeEnvironment !== appState.activeEnvironment) {
-                // If user has unsaved form changes, update the active environment indicator in-place without wiping their form edits
-                appState.activeEnvironment = data.activeEnvironment;
-                const detailsWasOpen = document.getElementById("individualToolsDetails")?.open;
-                renderEnvSidebar();
-                renderEnvEditor();
-                if (detailsWasOpen) {
-                    const d = document.getElementById("individualToolsDetails");
-                    if (d) d.open = true;
+            } else {
+                let changed = false;
+                if (data.activeEnvironment !== undefined && data.activeEnvironment !== appState.activeEnvironment) {
+                    appState.activeEnvironment = data.activeEnvironment;
+                    changed = true;
+                }
+                if (data.activeProfile !== undefined && data.activeProfile !== appState.activeProfile) {
+                    appState.activeProfile = data.activeProfile;
+                    changed = true;
+                }
+                if (changed) {
+                    renderEnvSidebar();
+                    renderEnvEditor();
                 }
             }
         }

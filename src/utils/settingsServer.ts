@@ -11,17 +11,22 @@ import {
     MCP_DIR,
     APP_CONFIG_PATH,
     CONFIG_PATH,
+    DEFAULT_PROFILE_NAME,
     ENV_PATH,
     EnvironmentConfig,
-    getActiveEnvironmentOrNull,
+    getActiveStateOrNull,
     getAllEnvironmentsOrEmpty,
     getAppConfigOrEmpty,
+    normalizeEnvironmentConfig,
     saveAllEnvironments,
     saveAppConfig,
     setOrClearActiveEnvironment
 } from "./config.js";
 import {
+    DEFAULT_DISABLED_TOOLS,
+    DEFAULT_ENABLED_CATEGORIES,
     ENVIRONMENT_CREDENTIAL_FIELDS,
+    PROFILE_PRESETS,
     TOOL_CATEGORIES,
     TOOL_CATEGORY_BY_NAME,
     getGlobalSectionsSchema
@@ -73,14 +78,15 @@ export const computeConfigVersionHash = async (): Promise<string> => {
 export const notifySettingsClientsOfConfigChange = async (): Promise<void> => {
     if (sseClients.size === 0) return;
     try {
-        const [configVersion, activeEnvironment] = await Promise.all([
+        const [configVersion, activeState] = await Promise.all([
             computeConfigVersionHash(),
-            getActiveEnvironmentOrNull().catch(() => null)
+            getActiveStateOrNull().catch(() => ({ environment: null, profile: DEFAULT_PROFILE_NAME }))
         ]);
         const payload = JSON.stringify({
             type: "config-changed",
             configVersion,
-            activeEnvironment,
+            activeEnvironment: activeState.environment,
+            activeProfile: activeState.profile,
             timestamp: Date.now()
         });
         for (const client of Array.from(sseClients)) {
@@ -374,15 +380,16 @@ const ensureSettingsServerRunning = async (
             }
 
             if (req.method === "GET" && parsedUrl.pathname === "/api/ping") {
-                const [configVersion, activeEnvironment] = await Promise.all([
+                const [configVersion, activeState] = await Promise.all([
                     computeConfigVersionHash(),
-                    getActiveEnvironmentOrNull().catch(() => null)
+                    getActiveStateOrNull().catch(() => ({ environment: null, profile: DEFAULT_PROFILE_NAME }))
                 ]);
                 sendJson(res, 200, {
                     success: true,
                     pid: process.pid,
                     configVersion,
-                    activeEnvironment,
+                    activeEnvironment: activeState.environment,
+                    activeProfile: activeState.profile,
                     timestamp: Date.now()
                 });
                 return;
@@ -394,16 +401,17 @@ const ensureSettingsServerRunning = async (
                     "Cache-Control": "no-cache, no-transform",
                     "Connection": "keep-alive"
                 });
-                const [configVersion, activeEnvironment] = await Promise.all([
+                const [configVersion, activeState] = await Promise.all([
                     computeConfigVersionHash(),
-                    getActiveEnvironmentOrNull().catch(() => null)
+                    getActiveStateOrNull().catch(() => ({ environment: null, profile: DEFAULT_PROFILE_NAME }))
                 ]);
                 res.write(
                     `data: ${JSON.stringify({
                         type: "connected",
                         pid: process.pid,
                         configVersion,
-                        activeEnvironment,
+                        activeEnvironment: activeState.environment,
+                        activeProfile: activeState.profile,
                         timestamp: Date.now()
                     })}\n\n`
                 );
@@ -415,15 +423,15 @@ const ensureSettingsServerRunning = async (
             }
 
             if (req.method === "GET" && parsedUrl.pathname === "/api/settings") {
-                const [activeEnvironment, environments, appConfig, configVersion] = await Promise.all([
-                    getActiveEnvironmentOrNull().catch(() => null),
+                const [activeState, environments, appConfig, configVersion] = await Promise.all([
+                    getActiveStateOrNull().catch(() => ({ environment: null, profile: DEFAULT_PROFILE_NAME })),
                     getAllEnvironmentsOrEmpty().catch(() => ({})),
                     getAppConfigOrEmpty().catch(() => ({})),
                     computeConfigVersionHash()
                 ]);
 
                 const tools = getToolsRegistry()
-                    .filter(t => !t.meta.alwaysAvailable)
+                    .filter(t => !t.meta.alwaysAvailable && t.name !== "netsuite_manage_toolsets")
                     .map(t => ({
                         name: t.name,
                         description: t.description,
@@ -435,13 +443,17 @@ const ensureSettingsServerRunning = async (
                 sendJson(res, 200, {
                     configDir: MCP_DIR,
                     configVersion,
-                    activeEnvironment,
+                    activeEnvironment: activeState.environment,
+                    activeProfile: activeState.profile,
                     environments,
                     appConfig,
                     schema: {
                         environmentCredentialFields: ENVIRONMENT_CREDENTIAL_FIELDS,
                         globalSections: getGlobalSectionsSchema(),
                         toolCategories: TOOL_CATEGORIES,
+                        profilePresets: PROFILE_PRESETS,
+                        defaultEnabledCategories: DEFAULT_ENABLED_CATEGORIES,
+                        defaultDisabledTools: DEFAULT_DISABLED_TOOLS,
                         tools
                     }
                 });
@@ -572,8 +584,12 @@ const ensureSettingsServerRunning = async (
                     typeof payload?.activeEnvironment === "string" && payload.activeEnvironment.trim() !== ""
                         ? payload.activeEnvironment.trim()
                         : null;
+                const targetProfile =
+                    typeof payload?.activeProfile === "string" && payload.activeProfile.trim() !== ""
+                        ? payload.activeProfile.trim()
+                        : DEFAULT_PROFILE_NAME;
 
-                await setOrClearActiveEnvironment(targetActive);
+                await setOrClearActiveEnvironment(targetActive, targetProfile);
                 const configVersion = await computeConfigVersionHash();
 
                 try {
@@ -586,6 +602,7 @@ const ensureSettingsServerRunning = async (
                 sendJson(res, 200, {
                     success: true,
                     activeEnvironment: targetActive,
+                    activeProfile: targetProfile,
                     configVersion
                 });
                 return;
@@ -629,17 +646,7 @@ const ensureSettingsServerRunning = async (
                         }
                     }
 
-                    if (cfg.tools && typeof cfg.tools === "object") {
-                        const toolsCfg: Record<string, any> = { ...cfg.tools };
-                        toolsCfg.disableDestructive = Boolean(toolsCfg.disableDestructive);
-                        toolsCfg.disableSdf = Boolean(toolsCfg.disableSdf);
-                        toolsCfg.disabledTools = Array.isArray(toolsCfg.disabledTools)
-                            ? toolsCfg.disabledTools.filter((t: unknown): t is string => typeof t === "string" && t.trim() !== "")
-                            : [];
-                        cfg.tools = toolsCfg;
-                    }
-
-                    cleanedEnvironments[envName] = cfg as EnvironmentConfig;
+                    cleanedEnvironments[envName] = normalizeEnvironmentConfig(cfg);
                 }
 
                 // Handle environment renames for existing .db and .lance files if provided
@@ -692,13 +699,22 @@ const ensureSettingsServerRunning = async (
                     targetActive = null;
                 }
 
+                let targetProfile: string =
+                    typeof payload.activeProfile === "string" && payload.activeProfile.trim() !== ""
+                        ? payload.activeProfile.trim()
+                        : DEFAULT_PROFILE_NAME;
+
+                if (targetActive && cleanedEnvironments[targetActive]?.profiles && !cleanedEnvironments[targetActive].profiles![targetProfile]) {
+                    targetProfile = DEFAULT_PROFILE_NAME;
+                }
+
                 const appConfig =
                     payload.appConfig && typeof payload.appConfig === "object" && !Array.isArray(payload.appConfig)
                         ? payload.appConfig
                         : {};
 
                 await saveAllEnvironments(cleanedEnvironments);
-                await setOrClearActiveEnvironment(targetActive);
+                await setOrClearActiveEnvironment(targetActive, targetProfile);
                 await saveAppConfig(appConfig);
                 if (activeInstance) {
                     await writePersistedSession(activeInstance.port, activeInstance.token);
@@ -715,6 +731,7 @@ const ensureSettingsServerRunning = async (
                 sendJson(res, 200, {
                     success: true,
                     activeEnvironment: targetActive,
+                    activeProfile: targetProfile,
                     configVersion
                 });
                 return;
