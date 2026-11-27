@@ -1,20 +1,16 @@
 import { getNetsuiteFieldsTool } from "./getFields.js";
 import { runSuiteQlTool } from "./runSuiteQl.js";
 import { getScriptLogsTool } from "./getScriptLogs.js";
-import { getRunFunctionLogsTool } from "./getRunFunctionLogs.js";
 import { uploadFileTool } from "./uploadFile.js";
 import { compareFilesTool } from "./compareFiles.js";
 import { viewFileTool } from "./viewFile.js";
 import { runFunctionTool } from "./runFunction.js";
 import { loadRecordSampleTool } from "./loadRecordSample.js";
-import { createRecordTool } from "./createRecord.js";
+import { upsertRecordTool } from "./upsertRecord.js";
 import { createCustomRecordTool } from "./createCustomRecord.js";
 import { createCustomListTool } from "./createCustomList.js";
 import { updateCustomRecordTool } from "./updateCustomRecord.js";
-import {
-    rebuildVectorDatabaseTool,
-    rebuildVectorDatabaseStatusTool
-} from "./rebuildVectorDatabase.js";
+import { rebuildVectorDatabaseTool } from "./rebuildVectorDatabase.js";
 import { searchTablesTool } from "./searchTables.js";
 import { getRelatedTablesTool } from "./getRelatedTables.js";
 import { listEnvironmentsTool } from "./listEnvironments.js";
@@ -46,7 +42,6 @@ export const toolsRegistry: ToolDefinition[] = [
     getNetsuiteFieldsTool,
     runSuiteQlTool,
     getScriptLogsTool,
-    getRunFunctionLogsTool,
     uploadFileTool,
     compareFilesTool,
     viewFileTool,
@@ -55,7 +50,7 @@ export const toolsRegistry: ToolDefinition[] = [
     searchScriptsTool,
     runFunctionTool,
     loadRecordSampleTool,
-    createRecordTool,
+    upsertRecordTool,
     createCustomRecordTool,
     createCustomListTool,
     updateCustomRecordTool,
@@ -72,7 +67,6 @@ export const toolsRegistry: ToolDefinition[] = [
     renderAdvancedPdfTemplateTool,
     renderEmailTemplateTool,
     rebuildVectorDatabaseTool,
-    rebuildVectorDatabaseStatusTool,
     searchTablesTool,
     getRelatedTablesTool
 ];

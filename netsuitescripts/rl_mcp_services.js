@@ -27,7 +27,7 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
     RUN_SUITE_QL: "RUN_SUITE_QL",
     RUN_FUNCTION: "RUN_FUNCTION",
     RECORD_SAMPLE: "RECORD_SAMPLE",
-    CREATE_RECORD: "CREATE_RECORD",
+    UPSERT_RECORD: "UPSERT_RECORD",
     GET_SUPPORTED_LOCALES: "GET_SUPPORTED_LOCALES",
     GET_TRANSLATIONS: "GET_TRANSLATIONS",
     RENDER_PDF_TEMPLATE: "RENDER_PDF_TEMPLATE",
@@ -581,16 +581,19 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
   }
 
   /**
-   * ACTION: CREATE_RECORD
-   * Creates a new NetSuite record in dynamic mode, sets the specified body fields, and saves it.
+   * ACTION: UPSERT_RECORD
+   * Creates a new NetSuite record or loads an existing one (when id / recordId is provided)
+   * in dynamic mode, sets the specified body fields, and saves it.
    *
    * @param {Object} request
    * @param {string} [request.recordType]
    * @param {string} [request.tableId]
+   * @param {string|number} [request.id]
+   * @param {string|number} [request.recordId]
    * @param {Array<{ fieldId: string, value: * }>} request.fields
    * @returns {Object}
    */
-  function handleCreateRecord(request) {
+  function handleUpsertRecord(request) {
     const rawRecordType =
       typeof request.recordType === "string" && request.recordType.trim()
         ? request.recordType.trim()
@@ -601,6 +604,14 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
     if (!rawRecordType) {
       return makeErrorResponse('Missing or invalid "recordType" (or "tableId")');
     }
+
+    const rawId =
+      request.id != null && String(request.id).trim() !== ""
+        ? String(request.id).trim()
+        : request.recordId != null && String(request.recordId).trim() !== ""
+          ? String(request.recordId).trim()
+          : null;
+    const isUpdate = Boolean(rawId);
 
     if (!Array.isArray(request.fields)) {
       return makeErrorResponse('Missing or invalid "fields": expected an array of { fieldId, value } objects');
@@ -630,10 +641,16 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
       const startGovernance = script.getRemainingUsage();
       const timer = new ExecutionTimer();
 
-      const recordObj = record.create({
-        type: rawRecordType,
-        isDynamic: true,
-      });
+      const recordObj = isUpdate
+        ? record.load({
+            type: rawRecordType,
+            id: rawId,
+            isDynamic: true,
+          })
+        : record.create({
+            type: rawRecordType,
+            isDynamic: true,
+          });
 
       for (const entry of request.fields) {
         const fieldId = entry.fieldId.trim();
@@ -672,6 +689,7 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
 
       return {
         success: true,
+        operation: isUpdate ? "update" : "create",
         recordId: recordId,
         recordType: rawRecordType,
         timeElapsedMS: timeElapsedMS,
@@ -679,7 +697,9 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
       };
     } catch (e) {
       const errMsg = getErrorMessage(e);
-      return makeErrorResponse(`Unable to create record: ${errMsg}`);
+      return makeErrorResponse(
+        `Unable to ${isUpdate ? "update" : "create"} record: ${errMsg}`,
+      );
     }
   }
 
@@ -1938,7 +1958,7 @@ define(["N/config", "N/file", "N/log", "N/query", "N/record", "N/render", "N/run
     [MCP_ACTION.RUN_SUITE_QL]: handleRunSuiteQL,
     [MCP_ACTION.RUN_FUNCTION]: handleRunFunction,
     [MCP_ACTION.RECORD_SAMPLE]: handleRecordSample,
-    [MCP_ACTION.CREATE_RECORD]: handleCreateRecord,
+    [MCP_ACTION.UPSERT_RECORD]: handleUpsertRecord,
     [MCP_ACTION.GET_SUPPORTED_LOCALES]: handleGetSupportedLocales,
     [MCP_ACTION.GET_TRANSLATIONS]: handleGetTranslations,
     [MCP_ACTION.RENDER_PDF_TEMPLATE]: handleRenderPdfTemplate,

@@ -46,8 +46,7 @@ export const DEFAULT_ENABLED_CATEGORIES: string[] = [
 ];
 
 export const DEFAULT_DISABLED_TOOLS: string[] = [
-    "netsuite_rebuild_vector_database",
-    "netsuite_rebuild_vector_database_status"
+    "netsuite_rebuild_vector_database"
 ];
 
 export const TOOL_CATEGORIES: ToolCategorySchema[] = [
@@ -59,7 +58,7 @@ export const TOOL_CATEGORIES: ToolCategorySchema[] = [
     {
         id: "data_operations",
         title: "Data Querying & Record Operations",
-        description: "Execute SuiteQL queries, load dynamic record samples, and create NetSuite records."
+        description: "Execute SuiteQL queries, load dynamic record samples, and create or update NetSuite records."
     },
     {
         id: "script_execution",
@@ -161,7 +160,7 @@ export const PROFILE_PRESETS: ProfilePresetSchema[] = [
         disabledTools: [
             ...DEFAULT_DISABLED_TOOLS,
             "netsuite_get_related_tables",
-            "netsuite_create_record"
+            "netsuite_upsert_record"
         ]
     },
     {
@@ -182,16 +181,14 @@ export const TOOL_CATEGORY_BY_NAME: Record<string, string> = {
     netsuite_get_fields: "table_discovery",
     netsuite_get_related_tables: "table_discovery",
     netsuite_rebuild_vector_database: "table_discovery",
-    netsuite_rebuild_vector_database_status: "table_discovery",
 
     // 2. Data Querying & Record Operations
     netsuite_run_suite_ql: "data_operations",
     netsuite_load_record_sample: "data_operations",
-    netsuite_create_record: "data_operations",
+    netsuite_upsert_record: "data_operations",
 
     // 3. Script Execution & Log Inspection
     netsuite_run_function: "script_execution",
-    netsuite_get_run_function_logs: "script_execution",
     netsuite_get_script_logs: "script_execution",
 
     // 4. File Cabinet & SDF Files

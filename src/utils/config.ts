@@ -221,18 +221,31 @@ export const normalizeProfileConfig = (
             : [...DEFAULT_DISABLED_TOOLS];
     }
 
-    const blockedTools = Array.from(
-        new Set(blockedToolsRaw.filter((t: unknown): t is string => typeof t === "string" && t.trim() !== ""))
-    );
+    const normalizeToolList = (list: unknown[]): string[] => {
+        const result: string[] = [];
+        for (const item of list) {
+            if (typeof item !== "string") continue;
+            const trimmed = item.trim();
+            if (!trimmed) continue;
+            if (
+                trimmed === "netsuite_rebuild_vector_database_status" ||
+                trimmed === "netsuite_get_run_function_logs"
+            ) {
+                continue;
+            }
+            const mapped = trimmed === "netsuite_create_record" ? "netsuite_upsert_record" : trimmed;
+            if (!result.includes(mapped)) {
+                result.push(mapped);
+            }
+        }
+        return result;
+    };
 
-    const disabledTools = Array.from(
-        new Set(disabledToolsRaw.filter((t: unknown): t is string => typeof t === "string" && t.trim() !== ""))
-    );
+    const blockedTools = normalizeToolList(blockedToolsRaw);
+    const disabledTools = normalizeToolList(disabledToolsRaw);
 
     const enabledToolsRaw = Array.isArray(rawProfile.enabledTools) ? rawProfile.enabledTools : [];
-    const enabledTools = Array.from(
-        new Set(enabledToolsRaw.filter((t: unknown): t is string => typeof t === "string" && t.trim() !== ""))
-    );
+    const enabledTools = normalizeToolList(enabledToolsRaw);
 
     const normalized: ToolProfileConfig = {
         disableDestructive: Boolean(rawProfile.disableDestructive ?? false),

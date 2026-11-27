@@ -276,21 +276,59 @@ export function startBackgroundRebuild(
 
 export const rebuildVectorDatabaseTool: ToolDefinition = {
     name: "netsuite_rebuild_vector_database",
-    description: "Asynchronously builds or replaces the vector database from the active NetSuite environment's schema database for semantic table discovery. Use 'netsuite_rebuild_vector_database_status' to check progress.",
+    description:
+        "Asynchronously builds or replaces the vector database from the active NetSuite environment's schema database for semantic table discovery, or checks the status and progress of an active/previous rebuild when 'statusOnly' is true.",
     meta: {
         isDestructive: false,
         requiresSdf: false
     },
     inputSchema: {
         type: "object",
-        properties: {}
+        properties: {
+            statusOnly: {
+                type: "boolean",
+                description:
+                    "If true, checks and returns the current vector database rebuild status and whether an existing vector database is available on disk without starting a new rebuild."
+            }
+        }
     },
-    execute: async () => {
+    execute: async (args?: { statusOnly?: boolean }) => {
         let environment: string;
         try {
             environment = await getActiveEnvironment();
         } catch (error: any) {
             return { content: [{ type: "text", text: `Config Error: ${error.message}` }] };
+        }
+
+        if (args?.statusOnly) {
+            const state = rebuildStates.get(environment);
+            if (state) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: formatRebuildStatusMessage(state)
+                    }]
+                };
+            }
+
+            const lancePath = getLanceDbPath(environment);
+            let dbExists = false;
+            try {
+                await fs.access(lancePath);
+                dbExists = true;
+            } catch {
+                dbExists = false;
+            }
+
+            return {
+                content: [{
+                    type: "text",
+                    text: [
+                        `No vector database rebuild has been started in this session for environment '${environment}'.`,
+                        `- Existing vector database available: ${dbExists ? "Yes (ready for 'netsuite_search_tables')" : "No (run 'netsuite_rebuild_vector_database' to create it)"}`
+                    ].join("\n")
+                }]
+            };
         }
 
         const existingState = rebuildStates.get(environment);
@@ -328,58 +366,7 @@ export const rebuildVectorDatabaseTool: ToolDefinition = {
                 type: "text",
                 text: [
                     `Started asynchronous vector database rebuild for environment '${environment}'.`,
-                    `Use 'netsuite_rebuild_vector_database_status' to check the progress of the rebuild.`
-                ].join("\n")
-            }]
-        };
-    }
-};
-
-export const rebuildVectorDatabaseStatusTool: ToolDefinition = {
-    name: "netsuite_rebuild_vector_database_status",
-    description:
-        "Checks the status and progress of the vector database rebuild for the active NetSuite environment, returning the current phase, indexed table progress, and elapsed time, or indicating whether an existing vector database is available on disk.",
-    meta: {
-        isDestructive: false,
-        requiresSdf: false
-    },
-    inputSchema: {
-        type: "object",
-        properties: {}
-    },
-    execute: async () => {
-        let environment: string;
-        try {
-            environment = await getActiveEnvironment();
-        } catch (error: any) {
-            return { content: [{ type: "text", text: `Config Error: ${error.message}` }] };
-        }
-
-        const state = rebuildStates.get(environment);
-        if (state) {
-            return {
-                content: [{
-                    type: "text",
-                    text: formatRebuildStatusMessage(state)
-                }]
-            };
-        }
-
-        const lancePath = getLanceDbPath(environment);
-        let dbExists = false;
-        try {
-            await fs.access(lancePath);
-            dbExists = true;
-        } catch {
-            dbExists = false;
-        }
-
-        return {
-            content: [{
-                type: "text",
-                text: [
-                    `No vector database rebuild has been started in this session for environment '${environment}'.`,
-                    `- Existing vector database available: ${dbExists ? "Yes (ready for 'netsuite_search_tables')" : "No (run 'netsuite_rebuild_vector_database' to create it)"}`
+                    `Call 'netsuite_rebuild_vector_database' with 'statusOnly: true' to check the progress of the rebuild.`
                 ].join("\n")
             }]
         };

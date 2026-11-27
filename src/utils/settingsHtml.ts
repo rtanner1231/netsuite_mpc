@@ -917,8 +917,7 @@ export const renderSettingsHtml = (token: string): string => {
                 profilePresets: [],
                 defaultEnabledCategories: ["table_discovery", "data_operations"],
                 defaultDisabledTools: [
-                    "netsuite_rebuild_vector_database",
-                    "netsuite_rebuild_vector_database_status"
+                    "netsuite_rebuild_vector_database"
                 ],
                 tools: []
             }
@@ -970,7 +969,7 @@ export const renderSettingsHtml = (token: string): string => {
                 : ["table_discovery", "data_operations"];
             const defDisabled = Array.isArray(appState.schema?.defaultDisabledTools)
                 ? [...appState.schema.defaultDisabledTools]
-                : ["netsuite_rebuild_vector_database", "netsuite_rebuild_vector_database_status"];
+                : ["netsuite_rebuild_vector_database"];
             return {
                 description: "Core schema discovery and data querying tools",
                 disableDestructive: false,
@@ -1007,7 +1006,7 @@ export const renderSettingsHtml = (token: string): string => {
                 if (!Array.isArray(p.disabledTools)) {
                     p.disabledTools = Array.isArray(appState.schema?.defaultDisabledTools)
                         ? [...appState.schema.defaultDisabledTools]
-                        : ["netsuite_rebuild_vector_database", "netsuite_rebuild_vector_database_status"];
+                        : ["netsuite_rebuild_vector_database"];
                 }
                 if (!Array.isArray(p.blockedTools)) p.blockedTools = [];
                 env.profiles[pName] = p;
@@ -1302,7 +1301,7 @@ export const renderSettingsHtml = (token: string): string => {
             if (matchingPreset) {
                 const defDisabled = Array.isArray(appState.schema?.defaultDisabledTools)
                     ? [...appState.schema.defaultDisabledTools]
-                    : ["netsuite_rebuild_vector_database", "netsuite_rebuild_vector_database_status"];
+                    : ["netsuite_rebuild_vector_database"];
                 env.profiles[profName] = {
                     description: matchingPreset.description,
                     disableDestructive: Boolean(matchingPreset.disableDestructive),
@@ -1362,7 +1361,7 @@ export const renderSettingsHtml = (token: string): string => {
 
             const defDisabled = Array.isArray(appState.schema?.defaultDisabledTools)
                 ? [...appState.schema.defaultDisabledTools]
-                : ["netsuite_rebuild_vector_database", "netsuite_rebuild_vector_database_status"];
+                : ["netsuite_rebuild_vector_database"];
 
             prof.description = preset.description;
             prof.disableDestructive = Boolean(preset.disableDestructive);

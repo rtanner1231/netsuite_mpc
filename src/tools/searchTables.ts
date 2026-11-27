@@ -106,7 +106,7 @@ export const searchTablesTool: ToolDefinition = {
                 return {
                     content: [{
                         type: "text",
-                        text: `Error: Vector database for environment '${environment}' is currently being rebuilt. Check 'netsuite_rebuild_vector_database_status' for progress.`
+                        text: `Error: Vector database for environment '${environment}' is currently being rebuilt. Call 'netsuite_rebuild_vector_database' with 'statusOnly: true' to check progress.`
                     }]
                 };
             }
