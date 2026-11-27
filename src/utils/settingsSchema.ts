@@ -204,7 +204,7 @@ export const TOOL_CATEGORY_BY_NAME: Record<string, string> = {
     // 6. Custom Objects (Records & Lists)
     netsuite_create_custom_record: "custom_objects",
     netsuite_update_custom_record: "custom_objects",
-    netsuite_create_custom_list: "custom_objects",
+    netsuite_upsert_custom_list: "custom_objects",
 
     // 7. Translation Collections
     netsuite_list_supported_locales: "translations",
@@ -493,7 +493,7 @@ export const getGlobalSectionsSchema = (): GlobalSectionSchema[] => {
         {
             id: "objectDefaults_LIST",
             title: "Custom List SDF Defaults",
-            description: "Default SDF XML attributes applied when creating custom lists via netsuite_create_custom_list.",
+            description: "Default SDF XML attributes applied when creating custom lists via netsuite_upsert_custom_list.",
             configPath: ["objectDefaults", ObjectDefaultType.LIST],
             fields: buildObjectDefaultsFields(projectDefaultsMap[ObjectDefaultType.LIST])
         }

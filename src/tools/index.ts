@@ -8,7 +8,7 @@ import { runFunctionTool } from "./runFunction.js";
 import { loadRecordSampleTool } from "./loadRecordSample.js";
 import { upsertRecordTool } from "./upsertRecord.js";
 import { createCustomRecordTool } from "./createCustomRecord.js";
-import { createCustomListTool } from "./createCustomList.js";
+import { upsertCustomListTool } from "./upsertCustomList.js";
 import { updateCustomRecordTool } from "./updateCustomRecord.js";
 import { rebuildVectorDatabaseTool } from "./rebuildVectorDatabase.js";
 import { searchTablesTool } from "./searchTables.js";
@@ -52,7 +52,7 @@ export const toolsRegistry: ToolDefinition[] = [
     loadRecordSampleTool,
     upsertRecordTool,
     createCustomRecordTool,
-    createCustomListTool,
+    upsertCustomListTool,
     updateCustomRecordTool,
     listSupportedLocalesTool,
     listTranslationCollectionsTool,
