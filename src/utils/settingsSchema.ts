@@ -77,8 +77,8 @@ export const TOOL_CATEGORIES: ToolCategorySchema[] = [
     },
     {
         id: "custom_objects",
-        title: "Custom Objects (Records & Lists)",
-        description: "Create and update NetSuite Custom Record Types, custom fields, and Custom Lists via SDF."
+        title: "Custom Objects (Records, Fields & Lists)",
+        description: "Create and update NetSuite Custom Record Types, standalone Custom Fields on native records, and Custom Lists via SDF."
     },
     {
         id: "translations",
@@ -201,9 +201,10 @@ export const TOOL_CATEGORY_BY_NAME: Record<string, string> = {
     netsuite_get_script: "script_management",
     netsuite_search_scripts: "script_management",
 
-    // 6. Custom Objects (Records & Lists)
+    // 6. Custom Objects (Records, Fields & Lists)
     netsuite_create_custom_record: "custom_objects",
     netsuite_update_custom_record: "custom_objects",
+    netsuite_upsert_custom_field: "custom_objects",
     netsuite_upsert_custom_list: "custom_objects",
 
     // 7. Translation Collections
@@ -398,10 +399,9 @@ const KNOWN_SDF_OPTIONS: Record<string, { value: string; label: string }[]> = {
     ],
     displaytype: [
         { value: "NORMAL", label: "NORMAL" },
-        { value: "DISABLED", label: "DISABLED" },
-        { value: "INLINE", label: "INLINE" },
-        { value: "HIDDEN", label: "HIDDEN" },
-        { value: "STATICTEXT", label: "STATICTEXT" }
+        { value: "LOCKED", label: "LOCKED (Disabled)" },
+        { value: "STATICTEXT", label: "STATICTEXT (Inline Text)" },
+        { value: "HIDDEN", label: "HIDDEN" }
     ],
     onparentdelete: [
         { value: "SET_NULL", label: "SET_NULL" },
@@ -486,7 +486,7 @@ export const getGlobalSectionsSchema = (): GlobalSectionSchema[] => {
         {
             id: "objectDefaults_FIELD",
             title: "Custom Field SDF Defaults",
-            description: "Default SDF XML attributes applied to custom record fields when creating or updating custom records.",
+            description: "Default SDF XML attributes applied to custom fields when creating or updating standalone custom fields (netsuite_upsert_custom_field) or custom record fields.",
             configPath: ["objectDefaults", ObjectDefaultType.FIELD],
             fields: buildObjectDefaultsFields(projectDefaultsMap[ObjectDefaultType.FIELD])
         },

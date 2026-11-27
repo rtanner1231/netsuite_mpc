@@ -9,7 +9,11 @@ import {
 import { getProjectRoot } from "../utils/mcp.js";
 import { getProjectConfig } from "../utils/project.js";
 import { withTempSdfProject } from "../utils/tempSdfProject.js";
-import { CustomRecordField, mapCustomRecordFields } from "../utils/customRecords.js";
+import {
+    CustomRecordField,
+    extractCustomObjectDependency,
+    mapCustomRecordFields
+} from "../utils/customRecords.js";
 import { create } from "xmlbuilder2";
 
 type RecordUpdateCustomRecord = {
@@ -148,13 +152,15 @@ export const updateCustomRecordTool: ToolDefinition = {
                         const deps = new Set<string>();
                         for (const f of allFields) {
                             const selType = f.selectrecordtype;
-                            if (typeof selType === "string") {
-                                if (selType.startsWith("[scriptid=customrecord")) {
-                                    const match = selType.match(/\[scriptid=(.*?)\]/);
-                                    if (match) deps.add(match[1]);
-                                } else if (selType.startsWith("customrecord")) {
-                                    deps.add(selType);
-                                }
+                            const dep = extractCustomObjectDependency(
+                                typeof selType === "string"
+                                    ? selType
+                                    : typeof selType === "object" && typeof selType?.["#"] === "string"
+                                    ? selType["#"]
+                                    : undefined
+                            );
+                            if (dep && dep !== scriptId.toLowerCase()) {
+                                deps.add(dep);
                             }
                         }
                         if (deps.size > 0) {

@@ -263,15 +263,54 @@ export const deployObjectFromTempProject = async (args: {
     options?: DeploySdfObjectOptions;
 }): Promise<string> => {
     const { tempProject, projectRoot, scriptId, xmlContent, manifestDependencies, options } = args;
+    return deployObjectsFromTempProject({
+        tempProject,
+        projectRoot,
+        objects: [
+            {
+                scriptId,
+                xmlContent,
+                rootElement: options?.rootElement
+            }
+        ],
+        manifestDependencies,
+        options
+    });
+};
+
+export interface BatchDeploySdfObjectItem {
+    scriptId: string;
+    xmlContent: string;
+    rootElement?: string;
+    subFolder?: string;
+}
+
+/**
+ * Deploys one or more SDF objects in a single `suitecloud project:deploy` pass inside an active `TempSdfProject`,
+ * and optionally syncs all deployed XML files (and manifest.xml dependencies) to the main project.
+ */
+export const deployObjectsFromTempProject = async (args: {
+    tempProject: TempSdfProject;
+    projectRoot: string;
+    objects: BatchDeploySdfObjectItem[];
+    manifestDependencies?: ManifestDependencies;
+    options?: DeploySdfObjectOptions;
+}): Promise<string> => {
+    const { tempProject, projectRoot, objects, manifestDependencies, options } = args;
     const projectConfig = options?.projectConfig ?? (await getProjectConfig(projectRoot));
 
-    const tempObjectPath = tempProject.getLocalObjectPath(scriptId);
-    await fs.mkdir(path.dirname(tempObjectPath), { recursive: true });
-    await fs.writeFile(tempObjectPath, xmlContent, "utf-8");
+    const deployObjectPaths: string[] = [];
+    for (const item of objects) {
+        const tempObjectPath = tempProject.getLocalObjectPath(item.scriptId);
+        await fs.mkdir(path.dirname(tempObjectPath), { recursive: true });
+        await fs.writeFile(tempObjectPath, item.xmlContent, "utf-8");
 
-    const fileName = path.basename(tempObjectPath);
+        const fileName = path.basename(tempObjectPath);
+        deployObjectPaths.push(`~/Objects/${fileName}`);
+    }
+
     await tempProject.setDeployConfig({
-        objects: [`~/Objects/${fileName}`]
+        objects: deployObjectPaths
     });
 
     if (manifestDependencies) {
@@ -290,23 +329,51 @@ export const deployObjectFromTempProject = async (args: {
             : effectiveSaveInfo.effectiveDefault;
 
     if (shouldSave) {
-        const syncResult = await syncSdfObjectToMainProject({
-            projectRoot,
-            sdfSrcDir: effectiveSaveInfo.sdfSrcDir,
-            scriptId,
-            xmlContent,
-            strategy: effectiveSaveInfo.objectsFolderStrategy,
-            explicitSubFolder: options?.subFolder,
-            rootElement: options?.rootElement,
-            manifestDependencies
-        });
+        if (objects.length === 1) {
+            const single = objects[0];
+            const syncResult = await syncSdfObjectToMainProject({
+                projectRoot,
+                sdfSrcDir: effectiveSaveInfo.sdfSrcDir,
+                scriptId: single.scriptId,
+                xmlContent: single.xmlContent,
+                strategy: effectiveSaveInfo.objectsFolderStrategy,
+                explicitSubFolder: single.subFolder ?? options?.subFolder,
+                rootElement: single.rootElement ?? options?.rootElement,
+                manifestDependencies
+            });
 
-        const actionLabel = syncResult.updatedExisting
-            ? "Updated existing project file"
-            : "Saved to project";
-        const manifestNote = syncResult.manifestUpdated ? " (and updated manifest.xml dependencies)" : "";
+            const actionLabel = syncResult.updatedExisting
+                ? "Updated existing project file"
+                : "Saved to project";
+            const manifestNote = syncResult.manifestUpdated ? " (and updated manifest.xml dependencies)" : "";
 
-        return `${deployResult.output}\n[${actionLabel}: ${syncResult.relativePath}${manifestNote}]`;
+            return `${deployResult.output}\n[${actionLabel}: ${syncResult.relativePath}${manifestNote}]`;
+        }
+
+        const savedNotes: string[] = [];
+        let anyManifestUpdated = false;
+        for (let i = 0; i < objects.length; i++) {
+            const item = objects[i];
+            const isLast = i === objects.length - 1;
+            const syncResult = await syncSdfObjectToMainProject({
+                projectRoot,
+                sdfSrcDir: effectiveSaveInfo.sdfSrcDir,
+                scriptId: item.scriptId,
+                xmlContent: item.xmlContent,
+                strategy: effectiveSaveInfo.objectsFolderStrategy,
+                explicitSubFolder: item.subFolder ?? options?.subFolder,
+                rootElement: item.rootElement ?? options?.rootElement,
+                manifestDependencies: isLast ? manifestDependencies : undefined
+            });
+            if (syncResult.manifestUpdated) {
+                anyManifestUpdated = true;
+            }
+            const actionLabel = syncResult.updatedExisting ? "Updated" : "Saved";
+            savedNotes.push(`${actionLabel} ${syncResult.relativePath}`);
+        }
+
+        const manifestNote = anyManifestUpdated ? " (and updated manifest.xml dependencies)" : "";
+        return `${deployResult.output}\n[Project Sync (${objects.length} files): ${savedNotes.join(", ")}${manifestNote}]`;
     }
 
     const skipReason =
