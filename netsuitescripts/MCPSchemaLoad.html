@@ -1062,7 +1062,7 @@
 
           if (isCustom) {
             const tRes = await this.runSuiteQL(`
-              SELECT ScriptID, Name, Description, IncludeName 
+              SELECT ScriptID, Name, nvl(aidescription,Description) AS description, IncludeName 
               FROM CustomRecordType 
               WHERE LOWER(ScriptID) = '${tableNameInput}'
               ORDER BY ScriptID
@@ -1078,7 +1078,7 @@
               SELECT 
                 LOWER(cf.ScriptID)                           AS id, 
                 cf.Name                                      AS label, 
-                cf.Description                               AS description, 
+                nvl(cf.aidescription,cf.Description)         AS description, 
                 cf.FieldValueType                            AS fieldtype,
                 CASE 
                   WHEN LOWER(cf.FieldValueType) IN ('list/record', 'multiple select') THEN 1 

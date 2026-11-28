@@ -87,7 +87,7 @@ const setNodeTextPreservingAttrs = (existingNode: any, newText: string): any => 
 export const upsertCustomListTool: ToolDefinition = {
     name: "netsuite_upsert_custom_list",
     description:
-        "Creates or updates a Custom List (customlist_*) and its list values in NetSuite via an isolated temporary SDF project. If the custom list already exists in NetSuite, its current definition is downloaded and merged: incoming values with a matching value scriptId update the existing item's label, incoming values whose label already exists under a different scriptId are deduplicated (skipped), and new values are appended. If the custom list does not exist, a new Custom List is created ('name' is required on creation) with configured list defaults applied. Optionally copies the deployed XML into the local project.",
+        "Creates or updates a Custom List (customlist_*) and its list values in NetSuite via an isolated temporary SDF project. Tip: Before updating an existing custom list in a new session, call 'netsuite_view_custom_object' to inspect its current list value 'scriptId's and labels. If the custom list already exists in NetSuite, its current definition is downloaded and merged: incoming values with a matching value scriptId update the existing item's label, incoming values whose label already exists under a different scriptId are deduplicated (skipped), and new values are appended. If the custom list does not exist, a new Custom List is created ('name' is required on creation) with configured list defaults applied. Optionally copies the deployed XML into the local project.",
     meta: {
         isDestructive: true,
         requiresSdf: true

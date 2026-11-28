@@ -9,7 +9,7 @@ export interface RecordFieldValue {
 export const upsertRecordTool: ToolDefinition = {
     name: "netsuite_upsert_record",
     description:
-        "Creates a new data record (row/instance) or updates an existing data record in NetSuite for a given table/record type (table_id) and sets the specified body field values (fields) via the MCP RESTlet. Works for both standard NetSuite records (e.g., 'customer', 'salesorder') and custom record instances (e.g., 'customrecord_*'). NOTE: To define or modify a Custom Record Type's schema/field definitions via SDF, use 'netsuite_upsert_custom_record_type' instead. If 'id' is provided, the existing record is loaded and updated; otherwise, a new record is created. Returns the saved internal recordId, operation ('create' or 'update'), elapsed time (timeElapsedMS), and governance units used (governanceUsed).",
+        "Creates a new data record (row/instance) or updates an existing data record in NetSuite for a given table/record type (table_id) and sets the specified header/body field values (fields) via the MCP RESTlet. Works for both standard NetSuite records (e.g., 'customer', 'vendor', 'employee', 'contact') and custom record instances (e.g., 'customrecord_*'). IMPORTANT: Only header/body field updates are supported (sublist/line-item mutations are not supported, so records requiring line items on creation such as transactions cannot be created with this tool, though header fields on existing records can be updated). NOTE: To define or modify a Custom Record Type's schema/field definitions via SDF, use 'netsuite_upsert_custom_record_type' instead. If 'id' is provided, the existing record is loaded and updated; otherwise, a new record is created. Returns the saved internal recordId, operation ('create' or 'update'), elapsed time (timeElapsedMS), and governance units used (governanceUsed).",
     meta: {
         isDestructive: true,
         requiresSdf: false
@@ -19,7 +19,7 @@ export const upsertRecordTool: ToolDefinition = {
         properties: {
             table_id: {
                 type: "string",
-                description: "The NetSuite record type / table ID (e.g., 'customer', 'salesorder', or a custom record scriptId such as 'customrecord_...')."
+                description: "The NetSuite record type / table ID (e.g., 'customer', 'vendor', 'employee', 'contact', or a custom record scriptId such as 'customrecord_...')."
             },
             id: {
                 anyOf: [
@@ -30,13 +30,13 @@ export const upsertRecordTool: ToolDefinition = {
             },
             fields: {
                 type: "array",
-                description: "An array of fieldId and value pairs to set on the record.",
+                description: "An array of header/body fieldId and value pairs to set on the record (sublist/line-item fields are not supported).",
                 items: {
                     type: "object",
                     properties: {
                         fieldId: {
                             type: "string",
-                            description: "The internal ID of the body field to set (e.g., 'companyname', 'subsidiary', or 'custrecord_...')."
+                            description: "The internal ID of the header/body field to set (e.g., 'companyname', 'subsidiary', or 'custrecord_...')."
                         },
                         value: {
                             description: "The value to assign to the field. For date/datetime fields, pass an ISO string (e.g., 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:mm:ss').",

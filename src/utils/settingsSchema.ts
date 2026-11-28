@@ -84,7 +84,7 @@ export const TOOL_CATEGORIES: ToolCategorySchema[] = [
     {
         id: "custom_objects",
         title: "Custom Objects (Records, Fields & Lists)",
-        description: "Create and update NetSuite Custom Record Types, standalone Custom Fields on native records, and Custom Lists via SDF."
+        description: "Inspect, list, create, and update NetSuite Custom Record Types, standalone Custom Fields on native records, and Custom Lists via SDF."
     },
     {
         id: "translations",
@@ -214,6 +214,7 @@ export const TOOL_CATEGORY_BY_NAME: Record<string, string> = {
     netsuite_search_scripts: "script_management",
 
     // 6. Custom Objects (Records, Fields & Lists)
+    netsuite_view_custom_object: "custom_objects",
     netsuite_upsert_custom_record_type: "custom_objects",
     netsuite_upsert_custom_field: "custom_objects",
     netsuite_upsert_custom_list: "custom_objects",

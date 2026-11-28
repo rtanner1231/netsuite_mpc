@@ -62,11 +62,11 @@ export type CustomRecordAccessType = "CUSTRECORDENTRYPERM" | "NONENEEDED" | "USE
 
 export type CustomRecordField = {
     scriptId: string;
-    label: string;
-    type: CustomFieldType;
+    label?: string;
+    type?: CustomFieldType;
     selectRecordType?: string;
-    description: string;
-    helpText: string;
+    description?: string;
+    helpText?: string;
     isMandatory?: boolean;
     storeValue?: boolean;
     showInList?: boolean;
@@ -462,32 +462,58 @@ const applyOptionalFieldProperties = (
 export const buildNewCustomRecordFieldObject = async (field: CustomRecordField): Promise<Record<string, any>> => {
     const normalizedScriptId = normalizeCustomRecordFieldScriptId(field.scriptId);
 
+    const missingCreateProps: string[] = [];
     if (!field.label || !field.label.trim()) {
-        throw new Error(`'label' is required for custom record field '${normalizedScriptId}'.`);
+        missingCreateProps.push("'label'");
     }
-    if (field.label.trim().length > 40) {
+    if (!field.type || !String(field.type).trim()) {
+        missingCreateProps.push("'type'");
+    }
+    if (!field.description || !field.description.trim()) {
+        missingCreateProps.push("'description'");
+    }
+    if (!field.helpText || !field.helpText.trim()) {
+        missingCreateProps.push("'helpText'");
+    }
+
+    if (missingCreateProps.length > 0) {
         throw new Error(
-            `Custom record field '${normalizedScriptId}' label '${field.label.trim()}' is ${field.label.trim().length} characters long, exceeding the NetSuite SDF limit of 40 characters.`
+            `${missingCreateProps.join(", ")} ${
+                missingCreateProps.length === 1 ? "is" : "are"
+            } required when creating a new custom record field ('${normalizedScriptId}'). Both 'description' and 'helpText' must be populated for schema documentation and semantic table discovery.`
+        );
+    }
+
+    const normalizedType = String(field.type).trim().toUpperCase() as CustomFieldType;
+    if (!CUSTOM_FIELD_TYPES.includes(normalizedType)) {
+        throw new Error(
+            `Invalid field type '${field.type}' for custom record field '${normalizedScriptId}'. Must be one of: ${CUSTOM_FIELD_TYPES.join(", ")}.`
+        );
+    }
+
+    if (field.label!.trim().length > 40) {
+        throw new Error(
+            `Custom record field '${normalizedScriptId}' label '${field.label!.trim()}' is ${field.label!.trim().length} characters long, exceeding the NetSuite SDF limit of 40 characters.`
         );
     }
     if (
-        (field.type === "SELECT" || field.type === "MULTISELECT") &&
+        (normalizedType === "SELECT" || normalizedType === "MULTISELECT") &&
         (!field.selectRecordType || !field.selectRecordType.trim())
     ) {
         throw new Error(
-            `'selectRecordType' is required for field '${normalizedScriptId}' when 'type' is '${field.type}'.`
+            `'selectRecordType' is required for field '${normalizedScriptId}' when 'type' is '${normalizedType}'.`
         );
     }
 
     const fieldObj: Record<string, any> = {
         "@scriptid": normalizedScriptId,
-        fieldtype: field.type,
-        label: field.label.trim(),
-        description: field.description,
-        help: field.helpText
+        fieldtype: normalizedType,
+        label: field.label!.trim(),
+        description: field.description!,
+        help: field.helpText!
     };
 
-    applyOptionalFieldProperties(fieldObj, field, false);
+    applyOptionalFieldProperties(fieldObj, { ...field, type: normalizedType }, false);
 
     const withDefaults = await applyDefaults(fieldObj, ObjectDefaultType.FIELD);
     if (typeof withDefaults.displaytype === "string") {
@@ -518,19 +544,43 @@ export const mergeExistingCustomRecordFieldObject = (
         existingFieldObj.label = setNodeTextPreservingAttrs(existingFieldObj.label, field.label.trim());
     }
 
+    let effectiveType: CustomFieldType | undefined = field.type;
     if (field.type !== undefined) {
-        existingFieldObj.fieldtype = setNodeTextPreservingAttrs(existingFieldObj.fieldtype, field.type);
+        const normalizedType = String(field.type).trim().toUpperCase() as CustomFieldType;
+        if (!CUSTOM_FIELD_TYPES.includes(normalizedType)) {
+            throw new Error(
+                `Invalid field type '${field.type}' for custom record field '${normalizedScriptId}'. Must be one of: ${CUSTOM_FIELD_TYPES.join(", ")}.`
+            );
+        }
+        effectiveType = normalizedType;
+        existingFieldObj.fieldtype = setNodeTextPreservingAttrs(existingFieldObj.fieldtype, normalizedType);
+    } else {
+        const existingTypeText =
+            typeof existingFieldObj.fieldtype === "string"
+                ? existingFieldObj.fieldtype
+                : typeof existingFieldObj.fieldtype === "object" && typeof existingFieldObj.fieldtype?.["#"] === "string"
+                  ? existingFieldObj.fieldtype["#"]
+                  : undefined;
+        if (existingTypeText) {
+            effectiveType = existingTypeText.trim().toUpperCase() as CustomFieldType;
+        }
     }
 
     if (field.description !== undefined) {
+        if (!field.description.trim()) {
+            throw new Error(`'description' cannot be empty when updating custom record field '${normalizedScriptId}'.`);
+        }
         existingFieldObj.description = setNodeTextPreservingAttrs(existingFieldObj.description, field.description);
     }
 
     if (field.helpText !== undefined) {
+        if (!field.helpText.trim()) {
+            throw new Error(`'helpText' cannot be empty when updating custom record field '${normalizedScriptId}'.`);
+        }
         existingFieldObj.help = setNodeTextPreservingAttrs(existingFieldObj.help, field.helpText);
     }
 
-    applyOptionalFieldProperties(existingFieldObj, field, true);
+    applyOptionalFieldProperties(existingFieldObj, { ...field, type: effectiveType }, true);
 
     return existingFieldObj;
 };

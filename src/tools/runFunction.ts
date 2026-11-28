@@ -1,5 +1,49 @@
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { ToolDefinition } from "../types/index.js";
 import { callNetsuiteRestlet } from "../utils/api.js";
+import { getProjectRoot } from "../utils/mcp.js";
+import { getProjectConfig, resolveProjectFile } from "../utils/project.js";
+
+/**
+ * Normalizes an input `filePath` argument. If it looks like a local workspace path
+ * (e.g., `TypeScripts/foo.ts` or `src/FileCabinet/SuiteScripts/foo.js`), maps it to the
+ * corresponding NetSuite File Cabinet path (`/SuiteScripts/foo.js`).
+ */
+const normalizeRequestedFilePath = async (
+    rawFilePath: string,
+    server: Server
+): Promise<string> => {
+    let cleaned = rawFilePath.trim();
+    if (cleaned.startsWith("[") && cleaned.endsWith("]")) {
+        cleaned = cleaned.slice(1, -1).trim();
+    }
+    cleaned = cleaned.replace(/\\/g, "/");
+
+    const looksLikeLocalProjectPath =
+        /\.ts$/i.test(cleaned) ||
+        /(?:^|\/)TypeScripts\//i.test(cleaned) ||
+        /(?:^|\/)FileCabinet\//i.test(cleaned);
+
+    if (looksLikeLocalProjectPath) {
+        try {
+            const projectRoot = await getProjectRoot(server);
+            const projectConfig = await getProjectConfig(projectRoot);
+            const resolved = await resolveProjectFile(projectRoot, cleaned, projectConfig);
+            if (resolved?.fileCabinetPath) {
+                return resolved.fileCabinetPath;
+            }
+        } catch {
+            // Fallback to simple TypeScripts -> SuiteScripts string mapping
+        }
+
+        return cleaned
+            .replace(/^\/?TypeScripts\//i, "/SuiteScripts/")
+            .replace(/^(?:.*\/)?FileCabinet\//i, "/")
+            .replace(/\.ts$/i, ".js");
+    }
+
+    return cleaned;
+};
 
 export const runFunctionTool: ToolDefinition = {
     name: "netsuite_run_function",
@@ -16,7 +60,8 @@ export const runFunctionTool: ToolDefinition = {
         properties: {
             filePath: {
                 type: "string",
-                description: "Path to the SuiteScript module in the File Cabinet (e.g., '/SuiteScripts/myModule.js')."
+                description:
+                    "Path to the SuiteScript module in the File Cabinet (e.g., '/SuiteScripts/myModule.js') or local workspace script path (e.g., 'TypeScripts/myModule.ts' or 'src/FileCabinet/SuiteScripts/myModule.ts')."
             },
             functionName: {
                 type: "string",
@@ -39,9 +84,14 @@ export const runFunctionTool: ToolDefinition = {
         },
         required: ["filePath", "functionName", "args"]
     },
-    execute: async (args: { filePath: string; functionName: string; args: any[] }) => {
+    execute: async (args: { filePath: string; functionName: string; args: any[] }, server: Server) => {
         try {
-            const payload = { action: "RUN_FUNCTION", ...args };
+            const normalizedFilePath = await normalizeRequestedFilePath(args.filePath, server);
+            const payload = {
+                action: "RUN_FUNCTION",
+                ...args,
+                filePath: normalizedFilePath
+            };
             const response = await callNetsuiteRestlet(payload);
             return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
         } catch (error: any) {

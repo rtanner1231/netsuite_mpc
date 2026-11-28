@@ -11,6 +11,7 @@ import { viewSavedSearchTool } from "./viewSavedSearch.js";
 import { createSavedSearchTool } from "./createSavedSearch.js";
 import { viewDatasetTool } from "./viewDataset.js";
 import { createDatasetTool } from "./createDataset.js";
+import { viewCustomObjectTool } from "./viewCustomObject.js";
 import { upsertCustomRecordTypeTool } from "./upsertCustomRecord.js";
 import { upsertCustomFieldTool } from "./upsertCustomField.js";
 import { upsertCustomListTool } from "./upsertCustomList.js";
@@ -59,6 +60,7 @@ export const toolsRegistry: ToolDefinition[] = [
     createSavedSearchTool,
     viewDatasetTool,
     createDatasetTool,
+    viewCustomObjectTool,
     upsertCustomRecordTypeTool,
     upsertCustomFieldTool,
     upsertCustomListTool,

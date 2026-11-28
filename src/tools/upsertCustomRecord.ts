@@ -98,7 +98,7 @@ const collectDependenciesFromCustomRecordFields = (
 export const upsertCustomRecordTypeTool: ToolDefinition = {
     name: "netsuite_upsert_custom_record_type",
     description:
-        "Creates or updates a Custom Record Type schema definition (customrecord_*) and its custom field definitions (custrecord_*) in NetSuite via an isolated temporary SDF project. NOTE: This tool defines or modifies the Custom Record Type table/schema (<customrecordtype>) via SDF; to create or update actual data records/rows inside an existing custom record table, use 'netsuite_upsert_record' instead. If the custom record type already exists in NetSuite, its current XML definition is downloaded and merged: any provided header properties are updated, incoming fields matching an existing field's scriptId update that field in-place (preserving unexposed XML properties), and new fields are appended with configured field defaults applied. If the custom record type does not exist yet, a new Custom Record Type is created ('name', 'description', and 'aiDescription' are strictly required on creation for semantic table discovery) with configured record and field defaults applied. Automatically resolves manifest.xml dependencies and optionally copies the deployed XML into the local project.",
+        "Creates or updates a Custom Record Type schema definition (customrecord_*) and its custom field definitions (custrecord_*) in NetSuite via an isolated temporary SDF project. NOTE: This tool defines or modifies the Custom Record Type table/schema (<customrecordtype>) via SDF; to create or update actual data records/rows inside an existing custom record table, use 'netsuite_upsert_record' instead. Tip: Before updating an existing custom record type in a new session, call 'netsuite_view_custom_object' to inspect its current header settings and custom field definitions. If the custom record type already exists in NetSuite, its current XML definition is downloaded and merged: any provided header properties are updated, incoming fields matching an existing field's scriptId update that field in-place (preserving unexposed XML properties), and new fields are appended with configured field defaults applied. If the custom record type does not exist yet, a new Custom Record Type is created ('name', 'description', and 'aiDescription' are strictly required on creation for semantic table discovery) with configured record and field defaults applied. Automatically resolves manifest.xml dependencies and optionally copies the deployed XML into the local project.",
     meta: {
         isDestructive: true,
         requiresSdf: true
@@ -191,12 +191,13 @@ export const upsertCustomRecordTypeTool: ToolDefinition = {
                         },
                         label: {
                             type: "string",
-                            description: "The label displayed in the UI for this field (maximum 40 characters)."
+                            description:
+                                "The label displayed in the UI for this field (maximum 40 characters). REQUIRED when creating a new field; optional when updating an existing field."
                         },
                         type: {
                             type: "string",
                             description:
-                                "Field type (e.g., 'TEXT', 'INTEGER', 'SELECT', 'DATE', 'CHECKBOX', 'CURRENCY').",
+                                "Field type (e.g., 'TEXT', 'INTEGER', 'SELECT', 'DATE', 'CHECKBOX', 'CURRENCY'). REQUIRED when creating a new field; optional when updating an existing field.",
                             enum: CUSTOM_FIELD_TYPES
                         },
                         selectRecordType: {
@@ -207,12 +208,12 @@ export const upsertCustomRecordTypeTool: ToolDefinition = {
                         description: {
                             type: "string",
                             description:
-                                "Description of the field (required for schema documentation and semantic table discovery)."
+                                "Description of the field. REQUIRED when creating a new field (used for schema documentation and semantic table discovery); optional when updating an existing field."
                         },
                         helpText: {
                             type: "string",
                             description:
-                                "Help text displayed when clicking the field label in the NetSuite UI."
+                                "Help text displayed when clicking the field label in the NetSuite UI. REQUIRED when creating a new field (used for schema documentation and semantic table discovery); optional when updating an existing field."
                         },
                         isMandatory: {
                             type: "boolean",
@@ -280,7 +281,7 @@ export const upsertCustomRecordTypeTool: ToolDefinition = {
                                 "(Optional) Subtab on this custom record where the field is placed (subtab)."
                         }
                     },
-                    required: ["scriptId", "label", "type", "description", "helpText"]
+                    required: ["scriptId"]
                 }
             },
             saveToProject: getSaveToProjectSchemaProperty()
@@ -463,11 +464,15 @@ export const upsertCustomRecordTypeTool: ToolDefinition = {
 
                                 if (matchById) {
                                     mergeExistingCustomRecordFieldObject(matchById, incomingField);
-                                    updatedFields.push(`${incomingField.scriptId} ("${incomingField.label}")`);
+                                    const resolvedLabel =
+                                        incomingField.label?.trim() ||
+                                        extractRefText(matchById.label)?.trim() ||
+                                        incomingField.scriptId;
+                                    updatedFields.push(`${incomingField.scriptId} ("${resolvedLabel}")`);
                                 } else {
                                     const builtNewField = await buildNewCustomRecordFieldObject(incomingField);
                                     existingFields.push(builtNewField);
-                                    addedFields.push(`${incomingField.scriptId} ("${incomingField.label}")`);
+                                    addedFields.push(`${incomingField.scriptId} ("${incomingField.label!.trim()}")`);
                                 }
                             }
 
