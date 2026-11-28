@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import fs from "fs";
 import fsPromises from "fs/promises";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";

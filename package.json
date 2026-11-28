@@ -1,13 +1,24 @@
 {
-  "name": "netsuite_mcp",
+  "name": "@rtanner1231/netsuite-dev-mcp",
   "version": "1.0.0",
-  "description": "NetSuite Schema Provider MCP Server",
+  "description": "NetSuite Schema Provider & Development MCP Server",
   "main": "build/index.js",
+  "bin": {
+    "netsuite-dev-mcp": "build/index.js"
+  },
+  "files": [
+    "build",
+    "netsuitescripts"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "node build/index.js",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.41.0",
