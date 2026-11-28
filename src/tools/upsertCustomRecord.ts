@@ -95,10 +95,10 @@ const collectDependenciesFromCustomRecordFields = (
     return deps.size > 0 ? { objects: Array.from(deps) } : undefined;
 };
 
-export const upsertCustomRecordTool: ToolDefinition = {
-    name: "netsuite_upsert_custom_record",
+export const upsertCustomRecordTypeTool: ToolDefinition = {
+    name: "netsuite_upsert_custom_record_type",
     description:
-        "Creates or updates a Custom Record Type (customrecord_*) and its custom fields (custrecord_*) in NetSuite via an isolated temporary SDF project. If the custom record already exists in NetSuite, its current XML definition is downloaded and merged: any provided header properties are updated, incoming fields matching an existing field's scriptId update that field in-place (preserving unexposed XML properties), and new fields are appended with configured field defaults applied. If the custom record does not exist yet, a new Custom Record Type is created ('name', 'description', and 'aiDescription' are strictly required on creation for semantic table discovery) with configured record and field defaults applied. Automatically resolves manifest.xml dependencies and optionally copies the deployed XML into the local project.",
+        "Creates or updates a Custom Record Type schema definition (customrecord_*) and its custom field definitions (custrecord_*) in NetSuite via an isolated temporary SDF project. NOTE: This tool defines or modifies the Custom Record Type table/schema (<customrecordtype>) via SDF; to create or update actual data records/rows inside an existing custom record table, use 'netsuite_upsert_record' instead. If the custom record type already exists in NetSuite, its current XML definition is downloaded and merged: any provided header properties are updated, incoming fields matching an existing field's scriptId update that field in-place (preserving unexposed XML properties), and new fields are appended with configured field defaults applied. If the custom record type does not exist yet, a new Custom Record Type is created ('name', 'description', and 'aiDescription' are strictly required on creation for semantic table discovery) with configured record and field defaults applied. Automatically resolves manifest.xml dependencies and optionally copies the deployed XML into the local project.",
     meta: {
         isDestructive: true,
         requiresSdf: true

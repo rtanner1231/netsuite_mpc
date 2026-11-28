@@ -213,7 +213,7 @@ export const TOOL_CATEGORY_BY_NAME: Record<string, string> = {
     netsuite_search_scripts: "script_management",
 
     // 6. Custom Objects (Records, Fields & Lists)
-    netsuite_upsert_custom_record: "custom_objects",
+    netsuite_upsert_custom_record_type: "custom_objects",
     netsuite_upsert_custom_field: "custom_objects",
     netsuite_upsert_custom_list: "custom_objects",
 
@@ -489,7 +489,7 @@ export const getGlobalSectionsSchema = (): GlobalSectionSchema[] => {
         {
             id: "objectDefaults_RECORD",
             title: "Custom Record SDF Defaults",
-            description: "Default SDF XML attributes applied when creating custom records via netsuite_upsert_custom_record.",
+            description: "Default SDF XML attributes applied when creating custom record types via netsuite_upsert_custom_record_type.",
             configPath: ["objectDefaults", ObjectDefaultType.RECORD],
             fields: buildObjectDefaultsFields(projectDefaultsMap[ObjectDefaultType.RECORD])
         },

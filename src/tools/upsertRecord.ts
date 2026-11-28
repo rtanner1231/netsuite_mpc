@@ -9,7 +9,7 @@ export interface RecordFieldValue {
 export const upsertRecordTool: ToolDefinition = {
     name: "netsuite_upsert_record",
     description:
-        "Creates a new record or updates an existing record in NetSuite for a given table/record type (table_id) and sets the specified body field values (fields) via the MCP RESTlet. If 'id' is provided, the existing record is loaded and updated; otherwise, a new record is created. Returns the saved internal recordId, operation ('create' or 'update'), elapsed time (timeElapsedMS), and governance units used (governanceUsed).",
+        "Creates a new data record (row/instance) or updates an existing data record in NetSuite for a given table/record type (table_id) and sets the specified body field values (fields) via the MCP RESTlet. Works for both standard NetSuite records (e.g., 'customer', 'salesorder') and custom record instances (e.g., 'customrecord_*'). NOTE: To define or modify a Custom Record Type's schema/field definitions via SDF, use 'netsuite_upsert_custom_record_type' instead. If 'id' is provided, the existing record is loaded and updated; otherwise, a new record is created. Returns the saved internal recordId, operation ('create' or 'update'), elapsed time (timeElapsedMS), and governance units used (governanceUsed).",
     meta: {
         isDestructive: true,
         requiresSdf: false
