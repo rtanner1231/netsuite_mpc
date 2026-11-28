@@ -1,6 +1,11 @@
 import { applyDefaults } from "../defaults/index.js";
 import { ObjectDefaultType } from "../defaults/types.js";
 import { ManifestDependencies } from "./deploy.js";
+import {
+    CustomFieldDisplayTypeInput,
+    formatSubtabReference,
+    normalizeDisplayType
+} from "./customFields.js";
 
 export type CustomFieldType =
     | "CHECKBOX"
@@ -51,6 +56,10 @@ export const CUSTOM_FIELD_TYPES: CustomFieldType[] = [
     "URL"
 ];
 
+export type CustomRecordOnParentDelete = "SET_NULL" | "STOP_DELETE" | "DELETE_THIS_CHILD";
+
+export type CustomRecordAccessType = "CUSTRECORDENTRYPERM" | "NONENEEDED" | "USEPERMISSIONLIST";
+
 export type CustomRecordField = {
     scriptId: string;
     label: string;
@@ -58,6 +67,19 @@ export type CustomRecordField = {
     selectRecordType?: string;
     description: string;
     helpText: string;
+    isMandatory?: boolean;
+    storeValue?: boolean;
+    showInList?: boolean;
+    globalSearch?: boolean;
+    displayType?: CustomFieldDisplayTypeInput;
+    defaultValue?: string;
+    defaultChecked?: boolean;
+    dynamicDefault?: string;
+    isFormula?: boolean;
+    isParent?: boolean;
+    parentSubtab?: string;
+    onParentDelete?: CustomRecordOnParentDelete;
+    subtab?: string;
 };
 
 // If a standard record type is being used, we must use the internal negative NetSuite ID.
@@ -189,6 +211,88 @@ export const standardRecordSdfIds: Record<string, number> = {
 };
 
 /**
+ * Normalizes and validates a Custom Record Type scriptId (`customrecord_*`).
+ */
+export const normalizeCustomRecordScriptId = (rawScriptId: string): string => {
+    let id = (rawScriptId || "").trim();
+    if (!id) {
+        throw new Error("'scriptId' is required.");
+    }
+
+    if (id.toLowerCase().endsWith(".xml")) {
+        id = id.slice(0, -".xml".length);
+    }
+
+    id = id.trim().toLowerCase();
+    if (!id) {
+        throw new Error("'scriptId' cannot be empty.");
+    }
+
+    if (!/^[a-z0-9_]+$/.test(id)) {
+        throw new Error(
+            `Invalid custom record scriptId '${id}'. Only lowercase letters, numbers, and underscores are allowed.`
+        );
+    }
+
+    if (!id.startsWith("customrecord_")) {
+        id = `customrecord_${id.replace(/^_+/, "")}`;
+    }
+
+    if (id === "customrecord_") {
+        throw new Error(`ScriptId '${id}' must include an identifier after prefix 'customrecord_'.`);
+    }
+
+    if (id.length > 38) {
+        throw new Error(
+            `Custom Record scriptId '${id}' is ${id.length} characters long, exceeding the NetSuite SDF limit of 38 characters.`
+        );
+    }
+
+    return id;
+};
+
+/**
+ * Normalizes and validates a Custom Record Field scriptId (`custrecord_*`).
+ */
+export const normalizeCustomRecordFieldScriptId = (rawScriptId: string): string => {
+    let id = (rawScriptId || "").trim();
+    if (!id) {
+        throw new Error("Field 'scriptId' is required.");
+    }
+
+    if (id.toLowerCase().endsWith(".xml")) {
+        id = id.slice(0, -".xml".length);
+    }
+
+    id = id.trim().toLowerCase();
+    if (!id) {
+        throw new Error("Field 'scriptId' cannot be empty.");
+    }
+
+    if (!/^[a-z0-9_]+$/.test(id)) {
+        throw new Error(
+            `Invalid custom record field scriptId '${id}'. Only lowercase letters, numbers, and underscores are allowed.`
+        );
+    }
+
+    if (!id.startsWith("custrecord_")) {
+        id = `custrecord_${id.replace(/^_+/, "")}`;
+    }
+
+    if (id === "custrecord_") {
+        throw new Error(`Field scriptId '${id}' must include an identifier after prefix 'custrecord_'.`);
+    }
+
+    if (id.length > 38) {
+        throw new Error(
+            `Custom record field scriptId '${id}' is ${id.length} characters long, exceeding the NetSuite SDF limit of 38 characters.`
+        );
+    }
+
+    return id;
+};
+
+/**
  * Formats the select record type (or rectype) properly.
  * If the type is a custom list or custom record it should be in the form:
  * [scriptid=customrecord_example] or [scriptid=customlist_example]
@@ -251,16 +355,31 @@ export const extractCustomObjectDependency = (refValue?: string): string | null 
 };
 
 /**
- * Create the manifest dependency requirements from the passed in fields. Any referenced custom records/lists will be added to the dependencies.
+ * Create the manifest dependency requirements from the passed in fields. Any referenced custom records/lists/subtabs will be added to the dependencies.
  */
-export const getManifestDependenciesFromFields = (fields: CustomRecordField[]): ManifestDependencies | undefined => {
+export const getManifestDependenciesFromFields = (
+    fields: CustomRecordField[],
+    selfRecordScriptId?: string
+): ManifestDependencies | undefined => {
     const deps = new Set<string>();
+    const selfLower = selfRecordScriptId ? selfRecordScriptId.toLowerCase() : "";
+
+    const addIfDep = (ref?: string) => {
+        const dep = extractCustomObjectDependency(ref);
+        if (dep && dep !== selfLower) {
+            deps.add(dep);
+        }
+    };
+
     for (const f of fields ?? []) {
         if ((f.type === 'SELECT' || f.type === 'MULTISELECT') && f.selectRecordType) {
-            const dep = extractCustomObjectDependency(f.selectRecordType);
-            if (dep) {
-                deps.add(dep);
-            }
+            addIfDep(f.selectRecordType);
+        }
+        if (f.subtab) {
+            addIfDep(f.subtab);
+        }
+        if (f.parentSubtab) {
+            addIfDep(f.parentSubtab);
         }
     }
 
@@ -271,24 +390,154 @@ export const getManifestDependenciesFromFields = (fields: CustomRecordField[]): 
         : undefined;
 };
 
+const setNodeTextPreservingAttrs = (existingNode: any, newText: string | null): any => {
+    if (newText === null) {
+        return null;
+    }
+    if (existingNode && typeof existingNode === "object" && !Array.isArray(existingNode)) {
+        return {
+            ...existingNode,
+            "#": newText
+        };
+    }
+    return newText;
+};
+
+const applyOptionalFieldProperties = (
+    targetObj: Record<string, any>,
+    field: CustomRecordField,
+    preserveAttrs: boolean
+) => {
+    const setVal = (key: string, val: string) => {
+        targetObj[key] = preserveAttrs ? setNodeTextPreservingAttrs(targetObj[key], val) : val;
+    };
+
+    if ((field.type === "SELECT" || field.type === "MULTISELECT") && field.selectRecordType) {
+        setVal("selectrecordtype", getSelectRecordType(field.selectRecordType));
+    }
+    if (field.isMandatory !== undefined) {
+        setVal("ismandatory", field.isMandatory ? "T" : "F");
+    }
+    if (field.storeValue !== undefined) {
+        setVal("storevalue", field.storeValue ? "T" : "F");
+    }
+    if (field.showInList !== undefined) {
+        setVal("showinlist", field.showInList ? "T" : "F");
+    }
+    if (field.globalSearch !== undefined) {
+        setVal("globalsearch", field.globalSearch ? "T" : "F");
+    }
+    if (field.displayType !== undefined) {
+        setVal("displaytype", normalizeDisplayType(field.displayType));
+    }
+    if (field.defaultValue !== undefined) {
+        setVal("defaultvalue", field.defaultValue);
+    }
+    if (field.defaultChecked !== undefined) {
+        setVal("defaultchecked", field.defaultChecked ? "T" : "F");
+    }
+    if (field.dynamicDefault !== undefined) {
+        setVal("dynamicdefault", field.dynamicDefault);
+    }
+    if (field.isFormula !== undefined) {
+        setVal("isformula", field.isFormula ? "T" : "F");
+    }
+    if (field.isParent !== undefined) {
+        setVal("isparent", field.isParent ? "T" : "F");
+    }
+    if (field.parentSubtab !== undefined && field.parentSubtab.trim() !== "") {
+        setVal("parentsubtab", formatSubtabReference(field.parentSubtab));
+    }
+    if (field.onParentDelete !== undefined) {
+        setVal("onparentdelete", field.onParentDelete);
+    }
+    if (field.subtab !== undefined && field.subtab.trim() !== "") {
+        setVal("subtab", formatSubtabReference(field.subtab));
+    }
+};
+
+/**
+ * Validates and builds a new `<customrecordcustomfield>` SDF object with field defaults applied.
+ */
+export const buildNewCustomRecordFieldObject = async (field: CustomRecordField): Promise<Record<string, any>> => {
+    const normalizedScriptId = normalizeCustomRecordFieldScriptId(field.scriptId);
+
+    if (!field.label || !field.label.trim()) {
+        throw new Error(`'label' is required for custom record field '${normalizedScriptId}'.`);
+    }
+    if (field.label.trim().length > 40) {
+        throw new Error(
+            `Custom record field '${normalizedScriptId}' label '${field.label.trim()}' is ${field.label.trim().length} characters long, exceeding the NetSuite SDF limit of 40 characters.`
+        );
+    }
+    if (
+        (field.type === "SELECT" || field.type === "MULTISELECT") &&
+        (!field.selectRecordType || !field.selectRecordType.trim())
+    ) {
+        throw new Error(
+            `'selectRecordType' is required for field '${normalizedScriptId}' when 'type' is '${field.type}'.`
+        );
+    }
+
+    const fieldObj: Record<string, any> = {
+        "@scriptid": normalizedScriptId,
+        fieldtype: field.type,
+        label: field.label.trim(),
+        description: field.description,
+        help: field.helpText
+    };
+
+    applyOptionalFieldProperties(fieldObj, field, false);
+
+    const withDefaults = await applyDefaults(fieldObj, ObjectDefaultType.FIELD);
+    if (typeof withDefaults.displaytype === "string") {
+        withDefaults.displaytype = normalizeDisplayType(withDefaults.displaytype);
+    }
+
+    return withDefaults;
+};
+
+/**
+ * Merges an incoming CustomRecordField definition into an existing parsed `<customrecordcustomfield>` XML node.
+ */
+export const mergeExistingCustomRecordFieldObject = (
+    existingFieldObj: Record<string, any>,
+    field: CustomRecordField
+): Record<string, any> => {
+    const normalizedScriptId = normalizeCustomRecordFieldScriptId(field.scriptId);
+
+    if (field.label !== undefined) {
+        if (!field.label.trim()) {
+            throw new Error(`'label' cannot be empty for custom record field '${normalizedScriptId}'.`);
+        }
+        if (field.label.trim().length > 40) {
+            throw new Error(
+                `Custom record field '${normalizedScriptId}' label '${field.label.trim()}' is ${field.label.trim().length} characters long, exceeding the NetSuite SDF limit of 40 characters.`
+            );
+        }
+        existingFieldObj.label = setNodeTextPreservingAttrs(existingFieldObj.label, field.label.trim());
+    }
+
+    if (field.type !== undefined) {
+        existingFieldObj.fieldtype = setNodeTextPreservingAttrs(existingFieldObj.fieldtype, field.type);
+    }
+
+    if (field.description !== undefined) {
+        existingFieldObj.description = setNodeTextPreservingAttrs(existingFieldObj.description, field.description);
+    }
+
+    if (field.helpText !== undefined) {
+        existingFieldObj.help = setNodeTextPreservingAttrs(existingFieldObj.help, field.helpText);
+    }
+
+    applyOptionalFieldProperties(existingFieldObj, field, true);
+
+    return existingFieldObj;
+};
+
 /**
  * Maps custom fields from standard representation to XML object structures
  */
 export const mapCustomRecordFields = async (fields: CustomRecordField[]) => {
-    return await Promise.all(fields.map(async (field) => {
-        const fieldObj: any = {
-            "@scriptid": field.scriptId,
-            fieldtype: field.type,
-            label: field.label,
-            description: field.description,
-            help: field.helpText,
-        };
-
-        if ((field.type === 'SELECT' || field.type === 'MULTISELECT') && field.selectRecordType) {
-            const selectRecordType = getSelectRecordType(field.selectRecordType);
-            fieldObj.selectrecordtype = selectRecordType;
-        }
-
-        return applyDefaults(fieldObj, ObjectDefaultType.FIELD);
-    }));
+    return await Promise.all(fields.map((field) => buildNewCustomRecordFieldObject(field)));
 };

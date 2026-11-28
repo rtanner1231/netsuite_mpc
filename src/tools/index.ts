@@ -11,10 +11,9 @@ import { viewSavedSearchTool } from "./viewSavedSearch.js";
 import { createSavedSearchTool } from "./createSavedSearch.js";
 import { viewDatasetTool } from "./viewDataset.js";
 import { createDatasetTool } from "./createDataset.js";
-import { createCustomRecordTool } from "./createCustomRecord.js";
+import { upsertCustomRecordTool } from "./upsertCustomRecord.js";
 import { upsertCustomFieldTool } from "./upsertCustomField.js";
 import { upsertCustomListTool } from "./upsertCustomList.js";
-import { updateCustomRecordTool } from "./updateCustomRecord.js";
 import { rebuildVectorDatabaseTool } from "./rebuildVectorDatabase.js";
 import { searchTablesTool } from "./searchTables.js";
 import { getRelatedTablesTool } from "./getRelatedTables.js";
@@ -60,8 +59,7 @@ export const toolsRegistry: ToolDefinition[] = [
     createSavedSearchTool,
     viewDatasetTool,
     createDatasetTool,
-    createCustomRecordTool,
-    updateCustomRecordTool,
+    upsertCustomRecordTool,
     upsertCustomFieldTool,
     upsertCustomListTool,
     listSupportedLocalesTool,
