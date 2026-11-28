@@ -294,12 +294,12 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
 
   /**
    * ACTION: SCRIPT_LOGS_BY_ID
-   * Retrieves the latest 500 execution logs for a script and deployment identified by scriptId and deploymentId.
-   * Supports both numeric internal/version IDs and custom script/deployment IDs.
+   * Retrieves the latest 500 execution logs for a script identified by scriptId (and optional deploymentId).
+   * Supports both numeric internal/version IDs and custom script/deployment IDs (customscript_*, custevsub_*, customdeploy_*).
    *
    * @param {Object} request
    * @param {string|number} request.scriptId
-   * @param {string|number} request.deploymentId
+   * @param {string|number} [request.deploymentId]
    * @returns {Object}
    */
   function handleScriptLogsById(request) {
@@ -311,20 +311,42 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
     if (!rawScriptId) {
       return makeErrorResponse("No script ID provided");
     }
-    if (!rawDeploymentId) {
-      return makeErrorResponse("No script deployment ID provided");
+
+    let scriptFilter;
+    if (/^\d+$/.test(rawScriptId)) {
+      scriptFilter = `s.id = ${Number(rawScriptId)}`;
+    } else {
+      const cleanedId = rawScriptId.replace(/\.xml$/i, "").trim();
+      const lowerId = cleanedId.toLowerCase();
+      const candidateIds = [cleanedId];
+
+      if (lowerId.startsWith("custevsub_")) {
+        if (!lowerId.endsWith("_script")) {
+          candidateIds.push(`${cleanedId}_script`);
+        }
+      } else if (!lowerId.startsWith("customscript_")) {
+        candidateIds.push(`customscript_${cleanedId}`);
+        candidateIds.push(`custevsub_${cleanedId}`);
+        candidateIds.push(`custevsub_${cleanedId}_script`);
+      }
+
+      const sqlIdList = candidateIds
+        .map((id) => `UPPER('${id.replace(/'/g, "''")}')`)
+        .join(", ");
+      scriptFilter = `UPPER(s.scriptid) IN (${sqlIdList})`;
     }
 
-    const escapedScriptId = rawScriptId.replace(/'/g, "''");
-    const escapedDeploymentId = rawDeploymentId.replace(/'/g, "''");
+    let deploymentJoin = "";
+    let deploymentWhere = "";
+    if (rawDeploymentId) {
+      const escapedDeploymentId = rawDeploymentId.replace(/'/g, "''");
+      const deploymentFilter = /^\d+$/.test(rawDeploymentId)
+        ? `(d.version = ${Number(rawDeploymentId)} OR d.primarykey = ${Number(rawDeploymentId)})`
+        : `UPPER(d.scriptid) = UPPER('${escapedDeploymentId}')`;
 
-    const scriptFilter = /^\d+$/.test(rawScriptId)
-      ? `s.id = ${Number(rawScriptId)}`
-      : `UPPER(s.scriptid) = UPPER('${escapedScriptId}')`;
-
-    const deploymentFilter = /^\d+$/.test(rawDeploymentId)
-      ? `(d.version = ${Number(rawDeploymentId)} OR d.primarykey = ${Number(rawDeploymentId)})`
-      : `UPPER(d.scriptid) = UPPER('${escapedDeploymentId}')`;
+      deploymentJoin = "JOIN scriptdeployment d ON d.script = s.id";
+      deploymentWhere = `AND ${deploymentFilter}`;
+    }
 
     const sql = `
             SELECT
@@ -337,19 +359,20 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
                 TO_CHAR(n.date, 'YYYY-MM-DD HH24:MI:SS') AS full_date_time
             FROM
                 script s
-                JOIN scriptdeployment d ON d.script = s.id
+                ${deploymentJoin}
                 LEFT JOIN scriptnote n ON n.scripttype = s.id
             WHERE
                 ${scriptFilter}
-                AND ${deploymentFilter}
+                ${deploymentWhere}
             ORDER BY
                 n.date DESC
         `;
 
-    return queryAndFormatScriptLogs(
-      sql,
-      "No script found for script ID and deployment ID",
-    );
+    const notFoundMessage = rawDeploymentId
+      ? "No script found for script ID and deployment ID"
+      : "No script found for script ID";
+
+    return queryAndFormatScriptLogs(sql, notFoundMessage);
   }
 
   /**
