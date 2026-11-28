@@ -35,6 +35,7 @@ export interface EnvironmentToolsConfig {
     disableSdf?: boolean;
     disabledTools?: string[];
     blockedTools?: string[];
+    allowedTools?: string[];
     enabledCategories?: string[];
     blockedCategories?: string[];
     enabledTools?: string[];
@@ -51,6 +52,7 @@ export interface ToolProfileConfig {
     enabledTools?: string[];
     disabledTools?: string[];
     blockedTools?: string[];
+    allowedTools?: string[];
 }
 
 export interface EnvironmentConfig {
@@ -187,6 +189,9 @@ export const createDefaultProfileConfig = (overrides?: Partial<ToolProfileConfig
             : [...DEFAULT_DISABLED_TOOLS],
         blockedTools: Array.isArray(overrides?.blockedTools)
             ? Array.from(new Set(overrides.blockedTools.filter((t): t is string => typeof t === "string" && t.trim() !== "")))
+            : [],
+        allowedTools: Array.isArray(overrides?.allowedTools)
+            ? Array.from(new Set(overrides.allowedTools.filter((t): t is string => typeof t === "string" && t.trim() !== "")))
             : []
     };
 };
@@ -247,6 +252,9 @@ export const normalizeProfileConfig = (
     const enabledToolsRaw = Array.isArray(rawProfile.enabledTools) ? rawProfile.enabledTools : [];
     const enabledTools = normalizeToolList(enabledToolsRaw);
 
+    const allowedToolsRaw = Array.isArray(rawProfile.allowedTools) ? rawProfile.allowedTools : [];
+    const allowedTools = normalizeToolList(allowedToolsRaw);
+
     const normalized: ToolProfileConfig = {
         disableDestructive: Boolean(rawProfile.disableDestructive ?? false),
         disableSdf: Boolean(rawProfile.disableSdf ?? false),
@@ -257,7 +265,8 @@ export const normalizeProfileConfig = (
         blockedCategories,
         enabledTools: enabledTools.filter(t => !blockedTools.includes(t)),
         disabledTools: disabledTools.filter(t => !blockedTools.includes(t)),
-        blockedTools
+        blockedTools,
+        allowedTools: allowedTools.filter(t => !blockedTools.includes(t))
     };
 
     if (typeof rawProfile.description === "string" && rawProfile.description.trim() !== "") {
@@ -511,6 +520,8 @@ export const getEnvironmentConfig = async (
 /**
  * Checks only the hard guardrails (blockedCategories, blockedTools, disableDestructive, disableSdf, missing sdfId)
  * that cannot be bypassed by dynamic session toolset activation.
+ * Tools explicitly listed in `profile.allowedTools` are exempted from `disableDestructive` and `disableSdf`
+ * (but never from `blockedCategories`, `blockedTools`, or a missing `sdfId`).
  */
 export const getToolHardGuardrailReason = (
     tool: ToolDefinition,
@@ -534,20 +545,84 @@ export const getToolHardGuardrailReason = (
         return "explicitly blocked in profile.blockedTools";
     }
 
-    if (tool.meta.isDestructive && profile.disableDestructive === true) {
+    // Technical prerequisite: SDF tools cannot run without an sdfId configured on the environment
+    if (tool.meta.requiresSdf && (typeof config.sdfId !== "string" || config.sdfId.trim() === "")) {
+        return "sdfId is not configured for this environment";
+    }
+
+    const allowedTools = Array.isArray(profile.allowedTools) ? profile.allowedTools : [];
+    const isExemptedFromGuardrails = allowedTools.includes(tool.name);
+
+    if (tool.meta.isDestructive && profile.disableDestructive === true && !isExemptedFromGuardrails) {
         return "destructive tools are disabled in this profile";
     }
 
-    if (tool.meta.requiresSdf) {
-        if (profile.disableSdf === true) {
-            return "SDF tools are disabled in this profile";
-        }
-        if (typeof config.sdfId !== "string" || config.sdfId.trim() === "") {
-            return "sdfId is not configured for this environment";
-        }
+    if (tool.meta.requiresSdf && profile.disableSdf === true && !isExemptedFromGuardrails) {
+        return "SDF tools are disabled in this profile";
     }
 
     return null;
+};
+
+/**
+ * Prunes any in-memory session-activated/deactivated tools or categories that are no longer
+ * eligible under the active profile's hard guardrails (e.g., after profile guardrails or
+ * guardrailExceptions are updated in the Settings UI or env.json).
+ */
+export const pruneIneligibleSessionOverrides = (
+    allTools: ToolDefinition[],
+    config: EnvironmentConfig,
+    profileName?: string | null
+): void => {
+    const { profileName: resolvedProfileName, profile } = resolveEnvironmentProfile(config, profileName);
+
+    if (profile.allowDynamicActivation === false) {
+        clearSessionCategories();
+        return;
+    }
+
+    const selectableTools = allTools.filter(
+        t => !t.meta.alwaysAvailable && t.name !== "netsuite_manage_toolsets"
+    );
+    const toolByName = new Map<string, ToolDefinition>(selectableTools.map(t => [t.name, t]));
+
+    for (const tName of Array.from(sessionActivatedTools)) {
+        const toolDef = toolByName.get(tName);
+        if (!toolDef || getToolHardGuardrailReason(toolDef, config, resolvedProfileName) !== null) {
+            sessionActivatedTools.delete(tName);
+        }
+    }
+
+    for (const tName of Array.from(sessionDeactivatedTools)) {
+        const toolDef = toolByName.get(tName);
+        if (!toolDef || getToolHardGuardrailReason(toolDef, config, resolvedProfileName) !== null) {
+            sessionDeactivatedTools.delete(tName);
+        }
+    }
+
+    const blockedCategories = new Set(Array.isArray(profile.blockedCategories) ? profile.blockedCategories : []);
+
+    for (const catId of Array.from(sessionActivatedCategories)) {
+        if (blockedCategories.has(catId)) {
+            sessionActivatedCategories.delete(catId);
+            continue;
+        }
+        if (selectableTools.length > 0) {
+            const catTools = selectableTools.filter(t => getToolCategory(t) === catId);
+            if (
+                catTools.length > 0 &&
+                catTools.every(t => getToolHardGuardrailReason(t, config, resolvedProfileName) !== null)
+            ) {
+                sessionActivatedCategories.delete(catId);
+            }
+        }
+    }
+
+    for (const catId of Array.from(sessionDeactivatedCategories)) {
+        if (blockedCategories.has(catId)) {
+            sessionDeactivatedCategories.delete(catId);
+        }
+    }
 };
 
 export const getEffectiveEnabledCategories = (profile: ToolProfileConfig): string[] => {

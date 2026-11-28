@@ -193,8 +193,9 @@ This file stores your NetSuite credentials for one or more environments along wi
 - **`enabledCategories`**: Array of tool category IDs enabled at session startup for the profile (`"table_discovery"`, `"data_operations"`, `"report_creation"`, `"script_execution"`, `"sdf_file_deployment"`, `"script_management"`, `"custom_objects"`, `"translations"`, `"templates"`). Defaults to `["table_discovery", "data_operations"]` so the server starts with a lean, high-accuracy tool footprint.
 - **`blockedCategories`** *(Hard Guardrail)*: Optional array of category IDs to hard-block completely so none of their tools can be enabled at startup or via dynamic session activation.
 - **`allowDynamicActivation`**: When `true` (default), exposes `netsuite_manage_toolsets` so the AI assistant can temporarily activate additional non-blocked tool categories in-memory for the current chat session as needed.
-- **`disableDestructive`** *(Hard Guardrail)*: When `true` (default `false`), blocks all tools that can mutate NetSuite data or metadata (e.g., `netsuite_upsert_record`, `netsuite_run_function`, `netsuite_upload_file`, `netsuite_deploy_script`, `netsuite_upsert_custom_record_type`, `netsuite_upsert_custom_field`, `netsuite_upsert_custom_list`, `netsuite_create_translation_collection`, `netsuite_update_translation_collection`, `netsuite_upsert_advanced_pdf_template`, `netsuite_upsert_email_template`). Cannot be overridden by dynamic session activation.
-- **`disableSdf`** *(Hard Guardrail)*: When `true` (default `false`), blocks all tools that require the SuiteCloud Development Framework (SDF) CLI. Cannot be overridden by dynamic session activation. *(Note: SDF tools are also automatically disabled if `sdfId` is omitted or empty for the environment.)*
+- **`disableDestructive`** *(Hard Guardrail)*: When `true` (default `false`), blocks all tools that can mutate NetSuite data or metadata (e.g., `netsuite_upsert_record`, `netsuite_run_function`, `netsuite_upload_file`, `netsuite_deploy_script`, `netsuite_upsert_custom_record_type`, `netsuite_upsert_custom_field`, `netsuite_upsert_custom_list`, `netsuite_create_translation_collection`, `netsuite_update_translation_collection`, `netsuite_upsert_advanced_pdf_template`, `netsuite_upsert_email_template`). Cannot be overridden by dynamic session activation unless a tool is explicitly listed in `allowedTools`.
+- **`disableSdf`** *(Hard Guardrail)*: When `true` (default `false`), blocks all tools that require the SuiteCloud Development Framework (SDF) CLI. Cannot be overridden by dynamic session activation unless a tool is explicitly listed in `allowedTools`. *(Note: SDF tools are also automatically disabled if `sdfId` is omitted or empty for the environment.)*
+- **`allowedTools`** *(Guardrail Exceptions)*: Optional array of specific tool names (e.g., `["netsuite_create_saved_search"]`) to explicitly exempt from the `disableDestructive` and `disableSdf` profile guardrails. Once exempted, the tool follows normal startup/on-demand category rules.
 - **`disabledTools`**: Optional array of specific tool names inside enabled categories to keep disabled at startup (defaults to `["netsuite_rebuild_vector_database"]`). Unlike `blockedTools`, these can still be toggled on or dynamically activated.
 - **`enabledTools`**: Optional array of specific tool names to enable at startup even if their parent category is not in `enabledCategories`.
 - **`blockedTools`** *(Hard Guardrail)*: Optional array of specific tool names to hard-block individually (cannot be dynamically activated).
@@ -225,6 +226,7 @@ Create `env.json` in the configuration directory:
           "data_operations"
         ],
         "enabledTools": [],
+        "allowedTools": [],
         "blockedTools": [
           "netsuite_rebuild_vector_database"
         ]

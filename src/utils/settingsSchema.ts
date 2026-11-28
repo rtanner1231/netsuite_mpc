@@ -38,6 +38,7 @@ export interface ProfilePresetSchema {
     enabledTools?: string[];
     disabledTools?: string[];
     blockedTools?: string[];
+    allowedTools?: string[];
 }
 
 export const DEFAULT_ENABLED_CATEGORIES: string[] = [

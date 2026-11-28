@@ -754,6 +754,59 @@ export const renderSettingsHtml = (token: string): string => {
             accent-color: var(--danger);
             cursor: inherit;
         }
+        .exception-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            background: rgba(15, 23, 42, 0.55);
+            color: var(--text-secondary);
+            font-size: 0.76rem;
+            font-weight: 500;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.15s ease;
+        }
+        .exception-pill:hover {
+            border-color: rgba(245, 158, 11, 0.65);
+            color: #fcd34d;
+        }
+        .exception-pill.active {
+            background: var(--warning-bg);
+            border-color: rgba(245, 158, 11, 0.65);
+            color: #fcd34d;
+        }
+        .exception-pill.disabled-pill {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .exception-pill input[type="checkbox"] {
+            margin: 0;
+            accent-color: var(--warning);
+            cursor: inherit;
+        }
+        .guardrail-exception-box {
+            margin-top: 6px;
+            padding: 7px 10px;
+            border-radius: 6px;
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            color: #fcd34d;
+            font-size: 0.77rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .guardrail-exception-box code {
+            color: #fde68a;
+            background: rgba(15, 23, 42, 0.55);
+            padding: 1px 5px;
+            border-radius: 4px;
+        }
         .context-warning-box {
             padding: 10px 14px;
             border-radius: 8px;
@@ -1037,7 +1090,8 @@ export const renderSettingsHtml = (token: string): string => {
                 blockedCategories: [],
                 enabledTools: [],
                 disabledTools: defDisabled,
-                blockedTools: []
+                blockedTools: [],
+                allowedTools: []
             };
         }
 
@@ -1067,6 +1121,7 @@ export const renderSettingsHtml = (token: string): string => {
                         : ["netsuite_rebuild_vector_database"];
                 }
                 if (!Array.isArray(p.blockedTools)) p.blockedTools = [];
+                if (!Array.isArray(p.allowedTools)) p.allowedTools = [];
                 env.profiles[pName] = p;
             });
         }
@@ -1375,7 +1430,8 @@ export const renderSettingsHtml = (token: string): string => {
                     blockedCategories: Array.isArray(matchingPreset.blockedCategories) ? [...matchingPreset.blockedCategories] : [],
                     enabledTools: Array.isArray(matchingPreset.enabledTools) ? [...matchingPreset.enabledTools] : [],
                     disabledTools: Array.isArray(matchingPreset.disabledTools) ? [...matchingPreset.disabledTools] : defDisabled,
-                    blockedTools: Array.isArray(matchingPreset.blockedTools) ? [...matchingPreset.blockedTools] : []
+                    blockedTools: Array.isArray(matchingPreset.blockedTools) ? [...matchingPreset.blockedTools] : [],
+                    allowedTools: Array.isArray(matchingPreset.allowedTools) ? [...matchingPreset.allowedTools] : []
                 };
             } else {
                 env.profiles[profName] = createDefaultProfileObj();
@@ -1436,6 +1492,7 @@ export const renderSettingsHtml = (token: string): string => {
             prof.enabledTools = Array.isArray(preset.enabledTools) ? [...preset.enabledTools] : [];
             prof.disabledTools = Array.isArray(preset.disabledTools) ? [...preset.disabledTools] : defDisabled;
             prof.blockedTools = Array.isArray(preset.blockedTools) ? [...preset.blockedTools] : [];
+            prof.allowedTools = Array.isArray(preset.allowedTools) ? [...preset.allowedTools] : [];
 
             markDirty(true);
             renderEnvEditor();
@@ -1557,15 +1614,69 @@ export const renderSettingsHtml = (token: string): string => {
 
             if (!Array.isArray(prof.blockedTools)) prof.blockedTools = [];
             if (!Array.isArray(prof.enabledTools)) prof.enabledTools = [];
+            if (!Array.isArray(prof.allowedTools)) prof.allowedTools = [];
 
             if (blocked) {
                 if (!prof.blockedTools.includes(toolName)) {
                     prof.blockedTools.push(toolName);
                 }
                 prof.enabledTools = prof.enabledTools.filter(t => t !== toolName);
+                prof.allowedTools = prof.allowedTools.filter(t => t !== toolName);
             } else {
                 prof.blockedTools = prof.blockedTools.filter(t => t !== toolName);
             }
+
+            markDirty(true);
+            renderEnvEditor();
+        }
+
+        function toggleIndividualToolGuardrailException(toolName, allowed) {
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
+            const env = appState.environments[selectedEnvName];
+            const profName = getSelectedProfileName(selectedEnvName);
+            const prof = env.profiles[profName];
+            if (!prof) return;
+
+            if (!Array.isArray(prof.allowedTools)) prof.allowedTools = [];
+            if (!Array.isArray(prof.blockedTools)) prof.blockedTools = [];
+
+            if (allowed) {
+                if (!prof.allowedTools.includes(toolName)) {
+                    prof.allowedTools.push(toolName);
+                }
+                prof.blockedTools = prof.blockedTools.filter(t => t !== toolName);
+            } else {
+                prof.allowedTools = prof.allowedTools.filter(t => t !== toolName);
+            }
+
+            markDirty(true);
+            renderEnvEditor();
+        }
+
+        function clearGuardrailExceptions(guardrailType) {
+            if (!selectedEnvName || !appState.environments[selectedEnvName]) return;
+            const env = appState.environments[selectedEnvName];
+            const profName = getSelectedProfileName(selectedEnvName);
+            const prof = env.profiles[profName];
+            if (!prof || !Array.isArray(prof.allowedTools)) return;
+
+            const selectableTools = appState.schema.tools || [];
+            const toolMap = {};
+            selectableTools.forEach(t => { toolMap[t.name] = t; });
+
+            prof.allowedTools = prof.allowedTools.filter(tName => {
+                const t = toolMap[tName];
+                if (!t) return false;
+                if (guardrailType === "destructive") {
+                    if (t.isDestructive && !(t.requiresSdf && prof.disableSdf === true)) {
+                        return false;
+                    }
+                    if (t.isDestructive) return false;
+                } else if (guardrailType === "sdf") {
+                    if (t.requiresSdf) return false;
+                }
+                return true;
+            });
 
             markDirty(true);
             renderEnvEditor();
@@ -1958,6 +2069,8 @@ export const renderSettingsHtml = (token: string): string => {
 
             let totalBaselineEnabledCount = 0;
             let toolsSectionsHtml = "";
+            let destructiveExceptionTools = [];
+            let sdfExceptionTools = [];
 
             categoryList.forEach(cat => {
                 const sectionTools = selectableTools.filter(t => {
@@ -1973,18 +2086,41 @@ export const renderSettingsHtml = (token: string): string => {
                 const isCategoryEnabled = !isCategoryBlocked && Array.isArray(activeProf.enabledCategories) && activeProf.enabledCategories.includes(cat.id);
                 let sectionEnabledCount = 0;
                 let sectionBlockedCount = 0;
+                let sectionExceptionCount = 0;
                 let sectionDisabledInEnabledCatCount = 0;
                 let sectionRowsHtml = "";
 
                 sectionTools.forEach(tool => {
-                    const lockedByDestructive = tool.isDestructive && activeProf.disableDestructive === true;
-                    const lockedBySdfSetting = tool.requiresSdf && activeProf.disableSdf === true;
+                    const isExplicitlyBlocked = Array.isArray(activeProf.blockedTools) && activeProf.blockedTools.includes(tool.name);
+                    const isExplicitlyAllowed = !isExplicitlyBlocked && Array.isArray(activeProf.allowedTools) && activeProf.allowedTools.includes(tool.name);
+                    const isExplicitlyEnabled = Array.isArray(activeProf.enabledTools) && activeProf.enabledTools.includes(tool.name);
+                    const isExplicitlyDisabled = Array.isArray(activeProf.disabledTools) && activeProf.disabledTools.includes(tool.name);
+
+                    const subjectToDestructiveGuardrail = tool.isDestructive && activeProf.disableDestructive === true;
+                    const subjectToSdfGuardrail = tool.requiresSdf && activeProf.disableSdf === true;
+                    const subjectToActiveGuardrail = subjectToDestructiveGuardrail || subjectToSdfGuardrail;
+
+                    const lockedByDestructive = subjectToDestructiveGuardrail && !isExplicitlyAllowed;
+                    const lockedBySdfSetting = subjectToSdfGuardrail && !isExplicitlyAllowed;
                     const lockedByMissingSdfId = tool.requiresSdf && sdfIdMissing;
                     const isHardGuardrailLocked = isCategoryBlocked || lockedByDestructive || lockedBySdfSetting || lockedByMissingSdfId;
 
-                    const isExplicitlyBlocked = Array.isArray(activeProf.blockedTools) && activeProf.blockedTools.includes(tool.name);
-                    const isExplicitlyEnabled = Array.isArray(activeProf.enabledTools) && activeProf.enabledTools.includes(tool.name);
-                    const isExplicitlyDisabled = Array.isArray(activeProf.disabledTools) && activeProf.disabledTools.includes(tool.name);
+                    const isGuardrailExceptionActive =
+                        !isCategoryBlocked &&
+                        !lockedByMissingSdfId &&
+                        !isExplicitlyBlocked &&
+                        subjectToActiveGuardrail &&
+                        isExplicitlyAllowed;
+
+                    if (isGuardrailExceptionActive) {
+                        sectionExceptionCount++;
+                        if (subjectToDestructiveGuardrail) {
+                            destructiveExceptionTools.push(tool.name);
+                        }
+                        if (subjectToSdfGuardrail) {
+                            sdfExceptionTools.push(tool.name);
+                        }
+                    }
 
                     if (isExplicitlyBlocked || isHardGuardrailLocked) {
                         sectionBlockedCount++;
@@ -1997,15 +2133,23 @@ export const renderSettingsHtml = (token: string): string => {
                         lockReasons.push("Locked because entire category is Blocked");
                     }
                     if (lockedByDestructive) {
-                        lockReasons.push("Locked by 'Disable Destructive Tools' guardrail");
+                        lockReasons.push("Locked by 'Disable Destructive Tools' guardrail (check 'Allow Exception' to override for this tool)");
                     }
                     if (lockedBySdfSetting) {
-                        lockReasons.push("Locked by 'Disable SDF Tools' guardrail");
+                        lockReasons.push("Locked by 'Disable SDF Tools' guardrail (check 'Allow Exception' to override for this tool)");
                     } else if (lockedByMissingSdfId) {
                         lockReasons.push("Locked because 'SDF Auth ID' is not configured");
                     }
                     if (isExplicitlyBlocked) {
                         lockReasons.push("Hard-blocked in blockedTools (cannot be dynamically activated)");
+                    }
+
+                    let exceptionNotes = [];
+                    if (isGuardrailExceptionActive) {
+                        const bypassedNames = [];
+                        if (subjectToDestructiveGuardrail) bypassedNames.push("'Disable Destructive Tools'");
+                        if (subjectToSdfGuardrail) bypassedNames.push("'Disable SDF Tools'");
+                        exceptionNotes.push("Exempted from " + bypassedNames.join(" & ") + " guardrail in this profile");
                     }
 
                     const isEffectiveBaselineEnabled =
@@ -2019,6 +2163,42 @@ export const renderSettingsHtml = (token: string): string => {
                     }
 
                     const isToggleLocked = isHardGuardrailLocked || isExplicitlyBlocked;
+                    const showExceptionControl = !isCategoryBlocked && !lockedByMissingSdfId && subjectToActiveGuardrail && !isExplicitlyBlocked;
+
+                    let actionPillHtml = "";
+                    if (showExceptionControl) {
+                        const bypassedLabel = (subjectToDestructiveGuardrail && subjectToSdfGuardrail)
+                            ? "Disable Destructive & SDF Tools guardrails"
+                            : (subjectToDestructiveGuardrail ? "Disable Destructive Tools guardrail" : "Disable SDF Tools guardrail");
+                        actionPillHtml = \`
+                            <label
+                                class="exception-pill \${isExplicitlyAllowed ? 'active' : ''}"
+                                title="Exempt this tool from the \${escapeHtml(bypassedLabel)} so it can be used in this profile"
+                            >
+                                <input
+                                    type="checkbox"
+                                    \${isExplicitlyAllowed ? "checked" : ""}
+                                    onchange="toggleIndividualToolGuardrailException('\${tool.name}', this.checked)"
+                                />
+                                <span>\${isExplicitlyAllowed ? "Exception Allowed" : "Allow Exception"}</span>
+                            </label>
+                        \`;
+                    } else {
+                        actionPillHtml = \`
+                            <label
+                                class="block-pill \${isExplicitlyBlocked ? 'active' : ''} \${isCategoryBlocked ? 'disabled-pill' : ''}"
+                                title="Hard-block this tool so it is never enabled at startup or via dynamic session activation"
+                            >
+                                <input
+                                    type="checkbox"
+                                    \${isExplicitlyBlocked ? "checked" : ""}
+                                    \${isCategoryBlocked ? "disabled" : ""}
+                                    onchange="toggleIndividualToolBlocked('\${tool.name}', this.checked)"
+                                />
+                                <span>Block</span>
+                            </label>
+                        \`;
+                    }
 
                     sectionRowsHtml += \`
                         <div class="tool-list-row \${isToggleLocked ? 'locked' : ''}">
@@ -2027,30 +2207,21 @@ export const renderSettingsHtml = (token: string): string => {
                                     <code>\${escapeHtml(tool.name)}</code>
                                     \${tool.isDestructive ? '<span class="badge badge-destructive">Destructive</span>' : ''}
                                     \${tool.requiresSdf ? '<span class="badge badge-sdf">Requires SDF</span>' : ''}
+                                    \${isGuardrailExceptionActive ? '<span class="badge badge-warning">Guardrail Exception</span>' : ''}
                                     \${(!isToggleLocked && ((isCategoryEnabled && isExplicitlyDisabled) || (!isCategoryEnabled && isExplicitlyEnabled)))
                                         ? '<span class="badge badge-override">Custom</span>'
                                         : ''
                                     }
                                 </div>
                                 <div class="toggle-desc" title="\${escapeHtml(tool.description)}">\${escapeHtml(tool.description)}</div>
-                                \${lockReasons.length > 0 ? \`<div class="toggle-note">⚠️ \${escapeHtml(lockReasons.join(" • "))}</div>\` : ''}
+                                \${lockReasons.length > 0 ? \`<div class="toggle-note">🔒 \${escapeHtml(lockReasons.join(" • "))}</div>\` : ''}
+                                \${exceptionNotes.length > 0 ? \`<div class="toggle-note">⚠️ \${escapeHtml(exceptionNotes.join(" • "))}</div>\` : ''}
                             </div>
                             <div class="row-controls">
-                                <label
-                                    class="block-pill \${isExplicitlyBlocked ? 'active' : ''} \${isCategoryBlocked ? 'disabled-pill' : ''}"
-                                    title="Hard-block this tool so it is never enabled at startup or via dynamic session activation"
-                                >
-                                    <input
-                                        type="checkbox"
-                                        \${isExplicitlyBlocked ? "checked" : ""}
-                                        \${isCategoryBlocked ? "disabled" : ""}
-                                        onchange="toggleIndividualToolBlocked('\${tool.name}', this.checked)"
-                                    />
-                                    <span>Block</span>
-                                </label>
+                                \${actionPillHtml}
                                 <label
                                     class="switch"
-                                    title="\${isToggleLocked ? escapeHtml(lockReasons.join(', ')) : 'Toggle whether this tool is enabled at session startup'}"
+                                    title="\${isToggleLocked ? escapeHtml(lockReasons.join(', ')) : 'Toggle whether this tool is enabled at session startup (when off, it remains available on-demand if Dynamic Activation is enabled)'}"
                                 >
                                     <input
                                         type="checkbox"
@@ -2091,6 +2262,7 @@ export const renderSettingsHtml = (token: string): string => {
                                         \${sectionEnabledCount} / \${sectionTools.length} active
                                     </span>
                                     \${catBadgeHtml}
+                                    \${sectionExceptionCount > 0 && !isCategoryBlocked ? \`<span class="badge badge-warning">\${sectionExceptionCount} \${sectionExceptionCount === 1 ? 'exception' : 'exceptions'}</span>\` : ''}
                                     \${sectionBlockedCount > 0 && !isCategoryBlocked ? \`<span class="badge badge-destructive">\${sectionBlockedCount} blocked</span>\` : ''}
                                 </div>
                                 \${cat.description ? \`<div class="tool-section-desc">\${escapeHtml(cat.description)}</div>\` : ''}
@@ -2246,7 +2418,7 @@ export const renderSettingsHtml = (token: string): string => {
                                 <span>Allow Dynamic Session Toolset Activation</span>
                                 <span class="badge badge-override">Context Saver</span>
                             </div>
-                            <div class="toggle-desc">When enabled, exposes <code>netsuite_manage_toolsets</code> so the AI assistant can temporarily activate inactive tool categories on-demand for the current chat session. Never bypasses <code>disableDestructive</code>, <code>disableSdf</code>, or <code>blockedTools</code>.</div>
+                            <div class="toggle-desc">When enabled, exposes <code>netsuite_manage_toolsets</code> so the AI assistant can temporarily activate inactive tool categories on-demand for the current chat session. Never bypasses <code>disableDestructive</code>, <code>disableSdf</code>, or <code>blockedTools</code> unless an explicit per-tool <strong>Allow Exception</strong> is checked below.</div>
                         </div>
                         <label class="switch">
                             <input
@@ -2263,8 +2435,15 @@ export const renderSettingsHtml = (token: string): string => {
                             <div class="toggle-title">
                                 <span>Disable Destructive Tools</span>
                                 <span class="badge badge-destructive">Hard Guardrail</span>
+                                \${destructiveExceptionTools.length > 0 ? \`<span class="badge badge-warning">\${destructiveExceptionTools.length} \${destructiveExceptionTools.length === 1 ? 'Exception' : 'Exceptions'}</span>\` : ''}
                             </div>
-                            <div class="toggle-desc">Hard-blocks all tools that create/modify records, upload files, deploy SDF objects, or run server-side functions. Cannot be overridden dynamically. Recommended for Production.</div>
+                            <div class="toggle-desc">Hard-blocks all tools that create/modify records, upload files, deploy SDF objects, or run server-side functions. Cannot be overridden dynamically by the AI. Individual low-risk tools can be explicitly exempted below via <strong>Allow Exception</strong>. Recommended for Production.</div>
+                            \${destructiveExceptionTools.length > 0 ? \`
+                                <div class="guardrail-exception-box">
+                                    <span>⚠️ <strong>Active exceptions (\${destructiveExceptionTools.length}):</strong> \${destructiveExceptionTools.map(t => '<code>' + escapeHtml(t) + '</code>').join(', ')}</span>
+                                    <button type="button" class="reset-link" style="color:#fcd34d;" onclick="clearGuardrailExceptions('destructive')">Clear exceptions</button>
+                                </div>
+                            \` : ''}
                         </div>
                         <label class="switch">
                             <input
@@ -2281,9 +2460,16 @@ export const renderSettingsHtml = (token: string): string => {
                             <div class="toggle-title">
                                 <span>Disable SDF Tools</span>
                                 <span class="badge badge-sdf">Hard Guardrail</span>
+                                \${sdfExceptionTools.length > 0 ? \`<span class="badge badge-warning">\${sdfExceptionTools.length} \${sdfExceptionTools.length === 1 ? 'Exception' : 'Exceptions'}</span>\` : ''}
                             </div>
-                            <div class="toggle-desc">Hard-blocks all SuiteCloud Development Framework (SDF) deployment and file upload tools. Cannot be overridden dynamically.</div>
+                            <div class="toggle-desc">Hard-blocks all SuiteCloud Development Framework (SDF) deployment and file upload tools. Cannot be overridden dynamically by the AI. Individual tools can be explicitly exempted below via <strong>Allow Exception</strong>.</div>
                             \${sdfIdMissing ? '<div class="toggle-note">ℹ️ Note: SDF Auth ID is currently blank, so SDF tools are automatically disabled.</div>' : ''}
+                            \${sdfExceptionTools.length > 0 ? \`
+                                <div class="guardrail-exception-box">
+                                    <span>⚠️ <strong>Active exceptions (\${sdfExceptionTools.length}):</strong> \${sdfExceptionTools.map(t => '<code>' + escapeHtml(t) + '</code>').join(', ')}</span>
+                                    <button type="button" class="reset-link" style="color:#fcd34d;" onclick="clearGuardrailExceptions('sdf')">Clear exceptions</button>
+                                </div>
+                            \` : ''}
                         </div>
                         <label class="switch">
                             <input
@@ -2297,7 +2483,7 @@ export const renderSettingsHtml = (token: string): string => {
 
                     <h4 style="margin: 20px 0 8px; font-size: 0.92rem; color: var(--text-primary);">Tool Categories &amp; Individual Tool Overrides</h4>
                     <div class="help-text" style="margin-bottom: 10px;">
-                        Toggle which categories are loaded at startup for the <strong>\${escapeHtml(selectedProfileName)}</strong> profile, or check <strong>Block Category</strong> to hard-block an entire category. Expand any category to toggle individual tools on/off at startup or hard-block individual tools.
+                        Toggle which categories are loaded at startup for the <strong>\${escapeHtml(selectedProfileName)}</strong> profile, or check <strong>Block</strong> to hard-block an entire category. Expand any category to toggle individual tools on/off at startup, hard-block specific tools, or check <strong>Allow Exception</strong> on a guardrail-locked tool to explicitly allow it.
                     </div>
 
                     <div class="categories-grid">

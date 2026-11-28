@@ -20,7 +20,8 @@ import {
     clearSessionCategories,
     getActiveStateOrNull,
     getEnvironmentConfig,
-    getToolDisableReason
+    getToolDisableReason,
+    pruneIneligibleSessionOverrides
 } from "./utils/config.js";
 import { getProjectRoot } from "./utils/mcp.js";
 import { resolveEffectiveSaveToProject } from "./utils/project.js";
@@ -64,6 +65,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     let profileName: string | null = null;
     try {
         ({ environment, config, profileName } = await getEnvironmentConfig());
+        if (config) {
+            pruneIneligibleSessionOverrides(toolsRegistry, config, profileName);
+        }
     } catch (error: any) {
         console.error(`Warning: Could not load environment config for ListTools: ${error.message}`);
     }
@@ -193,6 +197,13 @@ const startConfigWatcher = async (mcpServer: Server): Promise<void> => {
                 ) {
                     lastActiveState = currentState;
                     clearSessionCategories();
+                } else {
+                    try {
+                        const { config, profileName } = await getEnvironmentConfig();
+                        pruneIneligibleSessionOverrides(toolsRegistry, config, profileName);
+                    } catch {
+                        // Ignore if active environment config is temporarily unavailable
+                    }
                 }
                 await mcpServer.sendToolListChanged();
                 void notifySettingsClientsOfConfigChange();

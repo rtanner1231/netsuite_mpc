@@ -104,6 +104,13 @@ export const listEnvironmentsTool: ToolDefinition = {
                     const flags: string[] = [];
                     if (profCfg.disableDestructive) flags.push("disableDestructive");
                     if (profCfg.disableSdf) flags.push("disableSdf");
+                    if (
+                        (profCfg.disableDestructive || profCfg.disableSdf) &&
+                        Array.isArray(profCfg.allowedTools) &&
+                        profCfg.allowedTools.length > 0
+                    ) {
+                        flags.push(`exceptions: ${profCfg.allowedTools.join(", ")}`);
+                    }
                     if (profCfg.allowDynamicActivation === false) flags.push("dynamicActivationOff");
                     const flagStr = flags.length > 0 ? ` [${flags.join(", ")}]` : "";
                     const descStr = profCfg.description ? ` — ${profCfg.description}` : "";

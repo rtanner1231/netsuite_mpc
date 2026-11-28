@@ -19,6 +19,7 @@ import {
     getAllEnvironmentsOrEmpty,
     getAppConfigOrEmpty,
     normalizeEnvironmentConfig,
+    pruneIneligibleSessionOverrides,
     saveAllEnvironments,
     saveAppConfig,
     setOrClearActiveEnvironment
@@ -758,6 +759,13 @@ const ensureSettingsServerRunning = async (
                 await saveAllEnvironments(cleanedEnvironments);
                 await setOrClearActiveEnvironment(targetActive, targetProfile);
                 await saveAppConfig(appConfig);
+                if (targetActive && cleanedEnvironments[targetActive]) {
+                    pruneIneligibleSessionOverrides(
+                        getToolsRegistry(),
+                        cleanedEnvironments[targetActive],
+                        targetProfile
+                    );
+                }
                 if (activeInstance) {
                     await writePersistedSession(activeInstance.port, activeInstance.token);
                 }

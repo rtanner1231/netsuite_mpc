@@ -17,6 +17,7 @@ import {
     getToolCategory,
     getToolDisableReason,
     getToolHardGuardrailReason,
+    pruneIneligibleSessionOverrides,
     resolveEnvironmentProfile
 } from "../utils/config.js";
 
@@ -37,6 +38,8 @@ export const buildManageToolsetsDescription = (
         return `${baseIntro}\n\nAvailable tool categories: ${TOOL_CATEGORIES.map(c => `'${c.id}' (${c.title})`).join(", ")}.`;
     }
 
+    pruneIneligibleSessionOverrides(allTools, config, profileName);
+
     const { profileName: resolvedProfileName, profile } = resolveEnvironmentProfile(config, profileName);
     const blockedCategories = new Set(Array.isArray(profile.blockedCategories) ? profile.blockedCategories : []);
     const effectiveCategories = new Set(getEffectiveEnabledCategories(profile));
@@ -53,7 +56,7 @@ export const buildManageToolsetsDescription = (
         const catTools = selectableTools.filter(t => getToolCategory(t) === cat.id);
         const currentlyEnabledTools = catTools.filter(t => getToolDisableReason(t, config, resolvedProfileName) === null);
         const eligibleTools = catTools.filter(t => getToolHardGuardrailReason(t, config, resolvedProfileName) === null);
-        const isActive = effectiveCategories.has(cat.id) || currentlyEnabledTools.length > 0;
+        const isActive = (effectiveCategories.has(cat.id) && eligibleTools.length > 0) || currentlyEnabledTools.length > 0;
 
         if (isActive) {
             const tag = sessionActivated.has(cat.id) ? " [session-activated]" : "";
@@ -134,6 +137,7 @@ export const createManageToolsetsTool = (getAllTools: () => ToolDefinition[]): T
             const { environment, config, profileName, profile } = await getEnvironmentConfig();
 
             if (profile.allowDynamicActivation === false) {
+                clearSessionCategories();
                 return {
                     content: [{
                         type: "text",
@@ -146,6 +150,7 @@ export const createManageToolsetsTool = (getAllTools: () => ToolDefinition[]): T
             const allTools = getAllTools().filter(
                 t => !t.meta.alwaysAvailable && t.name !== "netsuite_manage_toolsets"
             );
+            pruneIneligibleSessionOverrides(allTools, config, profileName);
             const toolByName = new Map<string, ToolDefinition>(allTools.map(t => [t.name, t]));
 
             const action = args?.action;
@@ -217,7 +222,21 @@ export const createManageToolsetsTool = (getAllTools: () => ToolDefinition[]): T
             let actionSummary = "";
             if (action === "activate") {
                 const blockedReqCats = validRequestedCategories.filter(c => blockedCategories.has(c));
-                const allowedReqCats = validRequestedCategories.filter(c => !blockedCategories.has(c));
+                const nonBlockedReqCats = validRequestedCategories.filter(c => !blockedCategories.has(c));
+                const emptyGuardrailReqCats: string[] = [];
+                const allowedReqCats: string[] = [];
+
+                for (const catId of nonBlockedReqCats) {
+                    const catTools = allTools.filter(t => getToolCategory(t) === catId);
+                    const eligibleCatTools = catTools.filter(
+                        t => getToolHardGuardrailReason(t, config, profileName) === null
+                    );
+                    if (catTools.length > 0 && eligibleCatTools.length === 0) {
+                        emptyGuardrailReqCats.push(catId);
+                    } else {
+                        allowedReqCats.push(catId);
+                    }
+                }
 
                 const blockedReqTools: { name: string; reason: string }[] = [];
                 const allowedReqTools: string[] = [];
@@ -256,6 +275,9 @@ export const createManageToolsetsTool = (getAllTools: () => ToolDefinition[]): T
                 }
                 if (blockedReqCats.length > 0) {
                     parts.push(`Could not activate blocked category(s) [${blockedReqCats.join(", ")}] (hard-blocked in profile '${profileName}').`);
+                }
+                if (emptyGuardrailReqCats.length > 0) {
+                    parts.push(`Could not activate category(s) [${emptyGuardrailReqCats.join(", ")}] (all tools in category are restricted by profile guardrails in '${profileName}').`);
                 }
                 if (blockedReqTools.length > 0) {
                     parts.push(
@@ -305,8 +327,14 @@ export const createManageToolsetsTool = (getAllTools: () => ToolDefinition[]): T
             const baselineCategories = new Set(profile.enabledCategories || []);
             const sessionAddedCats = new Set(getSessionActivatedCategories());
             const sessionRemovedCats = new Set(getSessionDeactivatedCategories());
-            const sessionAddedTools = getSessionActivatedTools();
-            const sessionRemovedTools = getSessionDeactivatedTools();
+            const sessionAddedTools = getSessionActivatedTools().filter(tName => {
+                const tDef = toolByName.get(tName);
+                return Boolean(tDef && getToolHardGuardrailReason(tDef, config, profileName) === null);
+            });
+            const sessionRemovedTools = getSessionDeactivatedTools().filter(tName => {
+                const tDef = toolByName.get(tName);
+                return Boolean(tDef && getToolHardGuardrailReason(tDef, config, profileName) === null);
+            });
 
             const lines: string[] = [];
             if (actionSummary) {
@@ -315,8 +343,22 @@ export const createManageToolsetsTool = (getAllTools: () => ToolDefinition[]): T
             }
 
             lines.push(`Environment: ${environment} (Profile: ${profileName})`);
+            const allowedExceptions = Array.isArray(profile.allowedTools) ? profile.allowedTools : [];
+            const activeExceptionTools = allowedExceptions.filter(tName => {
+                const tDef = toolByName.get(tName);
+                if (!tDef) return false;
+                if (getToolHardGuardrailReason(tDef, config, profileName) !== null) return false;
+                return (
+                    (tDef.meta.isDestructive && profile.disableDestructive === true) ||
+                    (tDef.meta.requiresSdf && profile.disableSdf === true)
+                );
+            });
+            const exceptionSuffix =
+                activeExceptionTools.length > 0
+                    ? `, guardrailExceptions=[${activeExceptionTools.join(", ")}]`
+                    : "";
             lines.push(
-                `Profile Guardrails: disableDestructive=${Boolean(profile.disableDestructive)}, disableSdf=${Boolean(profile.disableSdf)}, sdfIdConfigured=${Boolean(config.sdfId && config.sdfId.trim())}`
+                `Profile Guardrails: disableDestructive=${Boolean(profile.disableDestructive)}, disableSdf=${Boolean(profile.disableSdf)}, sdfIdConfigured=${Boolean(config.sdfId && config.sdfId.trim())}${exceptionSuffix}`
             );
             if (sessionAddedTools.length > 0) {
                 lines.push(`Session-Activated Individual Tools: ${sessionAddedTools.join(", ")}`);
@@ -331,20 +373,22 @@ export const createManageToolsetsTool = (getAllTools: () => ToolDefinition[]): T
                 const isCatBlocked = blockedCategories.has(cat.id);
                 const catTools = allTools.filter(t => getToolCategory(t) === cat.id);
                 const enabledCatTools = catTools.filter(t => getToolDisableReason(t, config, profileName) === null);
-                const isActive = !isCatBlocked && (effectiveCategories.has(cat.id) || enabledCatTools.length > 0);
+                const eligibleCatTools = catTools.filter(t => getToolHardGuardrailReason(t, config, profileName) === null);
+                const isCatActive = !isCatBlocked && eligibleCatTools.length > 0 && effectiveCategories.has(cat.id);
+                const isActive = isCatActive || (!isCatBlocked && enabledCatTools.length > 0);
                 const isBaseline = baselineCategories.has(cat.id);
 
                 let stateLabel = isCatBlocked
                     ? "BLOCKED (profile.blockedCategories)"
-                    : effectiveCategories.has(cat.id)
+                    : isCatActive
                         ? "ACTIVE"
                         : enabledCatTools.length > 0
                             ? "PARTIALLY ACTIVE (individual tools)"
                             : "INACTIVE";
 
-                if (!isCatBlocked && effectiveCategories.has(cat.id) && !isBaseline && sessionAddedCats.has(cat.id)) {
+                if (isCatActive && !isBaseline && sessionAddedCats.has(cat.id)) {
                     stateLabel = "ACTIVE (session override)";
-                } else if (!isCatBlocked && !effectiveCategories.has(cat.id) && isBaseline && sessionRemovedCats.has(cat.id)) {
+                } else if (!isCatBlocked && !isCatActive && isBaseline && sessionRemovedCats.has(cat.id)) {
                     stateLabel = "INACTIVE (session override)";
                 }
 
