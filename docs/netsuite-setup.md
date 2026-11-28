@@ -10,11 +10,17 @@ To use `@rtanner1231/netsuite-dev-mcp`, your NetSuite environment needs four thi
 
 ## Where to Find the Companion NetSuite Files
 
-The companion files live in the `netsuitescripts/` directory of this package and repository:
-- `netsuitescripts/rl_mcp_services.js` — The SuiteScript 2.1 RESTlet backend.
-- `netsuitescripts/MCPSchemaLoad.html` — The browser-based schema extraction utility.
+The two companion files are bundled directly inside the `@rtanner1231/netsuite-dev-mcp` package under the `netsuitescripts/` directory:
+- **[`netsuitescripts/rl_mcp_services.js`](../netsuitescripts/rl_mcp_services.js)** — The SuiteScript 2.1 RESTlet backend.
+- **[`netsuitescripts/MCPSchemaLoad.html`](../netsuitescripts/MCPSchemaLoad.html)** — The browser-based schema extraction utility.
 
-If you are running the server via `npx -y @rtanner1231/netsuite-dev-mcp`, you can download both files directly from the GitHub repository's `netsuitescripts/` folder or locate them inside the installed NPM package cache.
+### How to Download the Files
+1. **Directly from the Settings Web UI (`/open-settings` > `Resources` tab) — Recommended:**
+   - Once the MCP server is running in your AI client (even via `npx -y @rtanner1231/netsuite-dev-mcp`), invoke the **`/open-settings`** prompt (or [`netsuite_open_settings`](./tools/netsuite_open_settings.md)) to open the local Settings page in your browser.
+   - Switch to the **Resources** tab at the top of the page and click **Download `rl_mcp_services.js`** and **Download `MCPSchemaLoad.html`**.
+   - Because these files are served directly from your running MCP server package, they are **guaranteed to match the exact version** of `@rtanner1231/netsuite-dev-mcp` you are running.
+2. **Relative Repository / Package Links:**
+   - If you are viewing these docs inside a tagged GitHub release, a cloned repository, or the NPM package browser, click the relative links above (`../netsuitescripts/rl_mcp_services.js` and `../netsuitescripts/MCPSchemaLoad.html`) to view or save the files for that exact version.
 
 ---
 

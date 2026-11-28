@@ -71,7 +71,8 @@ The server starts a local-only HTTP server bound to `127.0.0.1` (default port `4
 1. **Manage Environments:**
    - Add, rename, duplicate, or delete NetSuite environments (e.g., `Sandbox`, `Prod`, `QA`).
    - *(Note: If you rename an environment in the UI and click **Save Changes**, any existing `<OldName>.db` and `<OldName>.lance` databases on disk are automatically renamed to `<NewName>.db` and `<NewName>.lance`.)*
-2. **Test NetSuite Connections:**
+2. **Test NetSuite Connections & Download Companion NetSuite Files:**
+   - Switch to the **Resources** tab at the top of the UI to download the exact version-matched NetSuite files (**Download `rl_mcp_services.js`** and **Download `MCPSchemaLoad.html`**) directly from the running MCP package.
    - Click **Test Connection** on any environment tab to immediately test your OAuth 1.0a credentials and MCP RESTlet deployment (`SELECT 1 AS ping` via `RUN_SUITE_QL`) before saving.
 3. **Manage Schema (`.db`) & Vector (`.lance`) Databases:**
    - **Load SQLite Database (.db)...**: Pick a `.db` file downloaded from `MCPSchemaLoad.html` (up to 250 MB). The server verifies the SQLite 3 header, checks that the `tables` and `tablefields` tables exist, reports the total table and field counts, and atomically saves it to `<MCP_DIR>/<Environment>.db`.

@@ -18,9 +18,10 @@ Before running the MCP server, ensure you have the following set up:
      npm install -g @oracle/suitecloud-cli
      ```
    - *(Note: The SuiteCloud CLI requires **Java JDK 17 or 21** installed on your machine. Once installed, authenticate your NetSuite account using `suitecloud account:setup` to create an Auth ID / `sdfId`.)*
-3. **NetSuite Backend Components (`rl_mcp_services.js` & `MCPSchemaLoad.html`):**
-   - **MCP Services RESTlet (`netsuitescripts/rl_mcp_services.js`):** Upload and deploy this RESTlet in your NetSuite environment, and create an OAuth 1.0a Integration Record and Access Token.
-   - **MCP Schema Loader (`netsuitescripts/MCPSchemaLoad.html`):** Upload and open this utility in your NetSuite File Cabinet to extract your account's native and custom schema into a local SQLite database (`.db`).
+3. **NetSuite Backend Components ([`rl_mcp_services.js`](./netsuitescripts/rl_mcp_services.js) & [`MCPSchemaLoad.html`](./netsuitescripts/MCPSchemaLoad.html)):**
+   - **MCP Services RESTlet ([`netsuitescripts/rl_mcp_services.js`](./netsuitescripts/rl_mcp_services.js)):** Upload and deploy this RESTlet in your NetSuite environment, and create an OAuth 1.0a Integration Record and Access Token.
+   - **MCP Schema Loader ([`netsuitescripts/MCPSchemaLoad.html`](./netsuitescripts/MCPSchemaLoad.html)):** Upload and open this utility in your NetSuite File Cabinet to extract your account's native and custom schema into a local SQLite database (`.db`).
+   - *(Tip: You can also download both version-matched files with one click from the **Resources** tab inside the **`/open-settings`** web interface!)*
    - 👉 **See the [NetSuite Backend & Schema Setup Guide](./docs/netsuite-setup.md) for step-by-step instructions.**
 
 ---

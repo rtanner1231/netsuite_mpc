@@ -4,6 +4,7 @@ import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 import { exec } from "child_process";
+import { fileURLToPath } from "url";
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -57,6 +58,18 @@ const DEFAULT_SETTINGS_PORT = 45821;
 const SESSION_FILE_PATH = path.join(MCP_DIR, ".settings-session.json");
 const MAX_JSON_BODY_BYTES = 5 * 1024 * 1024; // 5 MB
 const MAX_SQLITE_BODY_BYTES = 250 * 1024 * 1024; // 250 MB
+const PACKAGE_ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const COMPANION_SCRIPTS_DIR = path.join(PACKAGE_ROOT_DIR, "netsuitescripts");
+const ALLOWED_COMPANION_FILES: Record<string, { fileName: string; contentType: string }> = {
+    "rl_mcp_services.js": {
+        fileName: "rl_mcp_services.js",
+        contentType: "application/javascript; charset=utf-8"
+    },
+    "MCPSchemaLoad.html": {
+        fileName: "MCPSchemaLoad.html",
+        contentType: "text/html; charset=utf-8"
+    }
+};
 
 export const computeConfigVersionHash = async (): Promise<string> => {
     const readSafe = async (filePath: string): Promise<string> => {
@@ -469,6 +482,56 @@ const ensureSettingsServerRunning = async (
                     sendJson(res, 200, { success: true, ...status });
                 } catch (err: any) {
                     sendJson(res, 400, { success: false, error: err?.message || "Invalid environment name" });
+                }
+                return;
+            }
+
+            if (req.method === "GET" && parsedUrl.pathname === "/api/download-companion-file") {
+                const fileParam = (parsedUrl.searchParams.get("file") || "").trim();
+                const companionSpec = ALLOWED_COMPANION_FILES[fileParam];
+                if (!companionSpec) {
+                    sendJson(res, 400, {
+                        success: false,
+                        error: `Invalid companion file '${fileParam}'. Allowed files: ${Object.keys(ALLOWED_COMPANION_FILES).join(", ")}`
+                    });
+                    return;
+                }
+
+                const companionPath = path.join(COMPANION_SCRIPTS_DIR, companionSpec.fileName);
+                try {
+                    const st = await fs.stat(companionPath);
+                    if (!st.isFile()) {
+                        sendJson(res, 404, {
+                            success: false,
+                            error: `Companion file '${companionSpec.fileName}' not found.`
+                        });
+                        return;
+                    }
+
+                    res.writeHead(200, {
+                        "Content-Type": companionSpec.contentType,
+                        "Content-Disposition": `attachment; filename="${companionSpec.fileName}"`,
+                        "Content-Length": String(st.size),
+                        "Cache-Control": "no-store"
+                    });
+
+                    const stream = createReadStream(companionPath);
+                    stream.on("error", () => {
+                        if (!res.headersSent) {
+                            sendJson(res, 500, {
+                                success: false,
+                                error: `Failed to read companion file '${companionSpec.fileName}'.`
+                            });
+                        } else {
+                            res.destroy();
+                        }
+                    });
+                    stream.pipe(res);
+                } catch {
+                    sendJson(res, 404, {
+                        success: false,
+                        error: `Companion file '${companionSpec.fileName}' not found at ${companionPath}.`
+                    });
                 }
                 return;
             }

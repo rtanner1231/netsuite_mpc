@@ -921,6 +921,7 @@ export const renderSettingsHtml = (token: string): string => {
     <div class="tabs-bar">
         <button class="tab-btn active" data-tab="environments" onclick="switchMainTab('environments')">Environments &amp; Tool Profiles</button>
         <button class="tab-btn" data-tab="global" onclick="switchMainTab('global')">Global &amp; SDF Defaults</button>
+        <button class="tab-btn" data-tab="resources" onclick="switchMainTab('resources')">Resources</button>
     </div>
 
     <div id="statusBanner" class="banner">
@@ -947,6 +948,55 @@ export const renderSettingsHtml = (token: string): string => {
         <section id="tab-global" class="tab-panel">
             <div class="sub-tabs" id="globalSubTabs"></div>
             <div id="globalSectionsContainer"></div>
+        </section>
+
+        <!-- TAB 3: RESOURCES -->
+        <section id="tab-resources" class="tab-panel">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h3>Companion NetSuite Files</h3>
+                        <p>Download the version-matched NetSuite scripts bundled with this MCP server to upload into your NetSuite environment during initial setup or after a package upgrade.</p>
+                    </div>
+                </div>
+                <div class="db-grid">
+                    <div class="db-box">
+                        <div>
+                            <div class="db-box-header">
+                                <span class="db-box-title">MCP Services RESTlet</span>
+                                <code>rl_mcp_services.js</code>
+                            </div>
+                            <div class="db-meta" style="margin-top: 10px;">
+                                <div>SuiteScript 2.1 RESTlet required for live SuiteQL queries, record operations, Saved Searches, SuiteAnalytics Datasets, script execution/logs, File Cabinet viewing, translations, and PDF/Email template rendering.</div>
+                                <div style="margin-top: 8px;"><strong>Setup:</strong> Upload to <em>Documents &gt; Files &gt; SuiteScripts</em>, create a Script Record and Released Deployment, and enter its <code>scriptId</code> and <code>deploymentId</code> on your Environment tab.</div>
+                            </div>
+                        </div>
+                        <div class="db-actions">
+                            <button type="button" class="btn btn-primary btn-sm" onclick="downloadCompanionFile('rl_mcp_services.js')">
+                                Download rl_mcp_services.js
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="db-box">
+                        <div>
+                            <div class="db-box-header">
+                                <span class="db-box-title">NetSuite Schema Loader</span>
+                                <code>MCPSchemaLoad.html</code>
+                            </div>
+                            <div class="db-meta" style="margin-top: 10px;">
+                                <div>Browser-based utility that runs inside your active NetSuite session to extract native tables, custom record types, custom fields, and join relationships into a local SQLite database (<code>.db</code>).</div>
+                                <div style="margin-top: 8px;"><strong>Setup:</strong> Upload to the NetSuite File Cabinet, click its Preview URL to open the utility, run an extraction, and load the downloaded <code>.db</code> file under <em>Schema &amp; Vector Database</em> on your Environment tab.</div>
+                            </div>
+                        </div>
+                        <div class="db-actions">
+                            <button type="button" class="btn btn-primary btn-sm" onclick="downloadCompanionFile('MCPSchemaLoad.html')">
+                                Download MCPSchemaLoad.html
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </section>
     </main>
 
@@ -1898,6 +1948,17 @@ export const renderSettingsHtml = (token: string): string => {
             const link = document.createElement("a");
             link.href = downloadUrl;
             link.download = envName + ".db";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function downloadCompanionFile(fileName) {
+            if (!fileName) return;
+            const downloadUrl = "/api/download-companion-file?token=" + encodeURIComponent(SESSION_TOKEN) + "&file=" + encodeURIComponent(fileName);
+            const link = document.createElement("a");
+            link.href = downloadUrl;
+            link.download = fileName;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
