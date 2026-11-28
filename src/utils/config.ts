@@ -168,8 +168,7 @@ export const getToolCategory = (tool: ToolDefinition): string => {
 };
 
 export const createDefaultProfileConfig = (overrides?: Partial<ToolProfileConfig>): ToolProfileConfig => {
-    return {
-        description: overrides?.description ?? "Core schema discovery and data querying tools",
+    const profile: ToolProfileConfig = {
         disableDestructive: Boolean(overrides?.disableDestructive ?? false),
         disableSdf: Boolean(overrides?.disableSdf ?? false),
         allowDynamicActivation: overrides?.allowDynamicActivation !== undefined
@@ -194,6 +193,10 @@ export const createDefaultProfileConfig = (overrides?: Partial<ToolProfileConfig
             ? Array.from(new Set(overrides.allowedTools.filter((t): t is string => typeof t === "string" && t.trim() !== "")))
             : []
     };
+    if (typeof overrides?.description === "string" && overrides.description.trim() !== "") {
+        profile.description = overrides.description.trim();
+    }
+    return profile;
 };
 
 export const normalizeProfileConfig = (

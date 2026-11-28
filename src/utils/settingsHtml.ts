@@ -462,34 +462,32 @@ export const renderSettingsHtml = (token: string): string => {
             border-radius: 8px;
             margin-bottom: 16px;
         }
-        .profile-tabs {
+        .profile-selector-group {
             display: flex;
             align-items: center;
             gap: 8px;
             flex-wrap: wrap;
         }
-        .profile-tab {
+        .profile-select {
+            width: auto;
+            min-width: 190px;
+            max-width: 280px;
             padding: 6px 12px;
             border-radius: 6px;
             border: 1px solid var(--border-color);
             background: var(--bg-secondary);
-            color: var(--text-secondary);
+            color: var(--text-primary);
             font-size: 0.84rem;
             font-weight: 500;
             cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            transition: all 0.15s;
+            outline: none;
+            transition: border-color 0.15s;
         }
-        .profile-tab:hover {
-            color: var(--text-primary);
+        .profile-select:hover {
             border-color: #475569;
         }
-        .profile-tab.selected {
-            background: rgba(59, 130, 246, 0.16);
+        .profile-select:focus {
             border-color: var(--accent);
-            color: var(--text-primary);
         }
         .preset-chips {
             display: flex;
@@ -1082,7 +1080,7 @@ export const renderSettingsHtml = (token: string): string => {
                 ? [...appState.schema.defaultDisabledTools]
                 : ["netsuite_rebuild_vector_database"];
             return {
-                description: "Core schema discovery and data querying tools",
+                description: "",
                 disableDestructive: false,
                 disableSdf: false,
                 allowDynamicActivation: true,
@@ -1422,7 +1420,7 @@ export const renderSettingsHtml = (token: string): string => {
                     ? [...appState.schema.defaultDisabledTools]
                     : ["netsuite_rebuild_vector_database"];
                 env.profiles[profName] = {
-                    description: matchingPreset.description,
+                    description: "",
                     disableDestructive: Boolean(matchingPreset.disableDestructive),
                     disableSdf: Boolean(matchingPreset.disableSdf),
                     allowDynamicActivation: Boolean(matchingPreset.allowDynamicActivation),
@@ -1483,7 +1481,6 @@ export const renderSettingsHtml = (token: string): string => {
                 ? [...appState.schema.defaultDisabledTools]
                 : ["netsuite_rebuild_vector_database"];
 
-            prof.description = preset.description;
             prof.disableDestructive = Boolean(preset.disableDestructive);
             prof.disableSdf = Boolean(preset.disableSdf);
             prof.allowDynamicActivation = Boolean(preset.allowDynamicActivation);
@@ -2016,21 +2013,17 @@ export const renderSettingsHtml = (token: string): string => {
                 \`;
             });
 
-            // Profile selector tabs
+            // Profile selector dropdown options
             const profileNames = Object.keys(env.profiles);
-            let profileTabsHtml = "";
+            let profileOptionsHtml = "";
             profileNames.forEach(pName => {
                 const isSelected = pName === selectedProfileName;
                 const isThisActive = isEnvActive && (appState.activeProfile || DEFAULT_PROFILE_NAME) === pName;
-                profileTabsHtml += \`
-                    <button
-                        type="button"
-                        class="profile-tab \${isSelected ? 'selected' : ''}"
-                        onclick="selectProfileTab('\${escapeHtml(pName)}')"
-                    >
-                        <span>\${escapeHtml(pName)}</span>
-                        \${isThisActive ? '<span class="badge badge-active" style="font-size:0.62rem; padding:1px 6px;">Active</span>' : ''}
-                    </button>
+                const optionLabel = isThisActive ? \`\${pName} (Active)\` : pName;
+                profileOptionsHtml += \`
+                    <option value="\${escapeHtml(pName)}" \${isSelected ? 'selected' : ''}>
+                        \${escapeHtml(optionLabel)}
+                    </option>
                 \`;
             });
 
@@ -2364,15 +2357,21 @@ export const renderSettingsHtml = (token: string): string => {
                     </div>
 
                     <div class="profile-bar">
-                        <div class="profile-tabs">
-                            <span style="font-size:0.8rem; color:var(--text-secondary); margin-right:4px;">Profiles:</span>
-                            \${profileTabsHtml}
+                        <div class="profile-selector-group">
+                            <label for="profile_select_input" style="font-size:0.82rem; font-weight:500; color:var(--text-secondary);">Profile:</label>
+                            <select
+                                id="profile_select_input"
+                                class="profile-select"
+                                onchange="selectProfileTab(this.value)"
+                            >
+                                \${profileOptionsHtml}
+                            </select>
                             <button type="button" class="btn btn-sm" onclick="addNewProfile()">+ Add Profile</button>
                         </div>
                         <div style="display:flex; align-items:center; gap:8px;">
                             \${isProfileActive
                                 ? '<span class="badge badge-active" style="padding:5px 10px;">✓ Active Profile</span>'
-                                : \`<button type="button" class="btn btn-sm btn-primary" onclick="setAsActiveEnvironmentAndProfile('\${escapeHtml(selectedEnvName)}', '\${escapeHtml(selectedProfileName)}')">Activate '\${escapeHtml(selectedProfileName)}' Now</button>\`
+                                : \`<button type="button" class="btn btn-sm btn-primary" onclick="setAsActiveEnvironmentAndProfile('\${escapeHtml(selectedEnvName)}', '\${escapeHtml(selectedProfileName)}')">Activate Profile</button>\`
                             }
                             \${selectedProfileName !== DEFAULT_PROFILE_NAME
                                 ? \`<button type="button" class="btn btn-sm btn-danger" onclick="deleteSelectedProfile()">Delete Profile</button>\`
@@ -2383,12 +2382,12 @@ export const renderSettingsHtml = (token: string): string => {
 
                     <div class="form-grid" style="margin-bottom: 16px;">
                         <div class="form-field">
-                            <label for="profile_desc_input">Profile Description (<code>\${escapeHtml(selectedProfileName)}</code>)</label>
+                            <label for="profile_desc_input">Profile Description</label>
                             <input
                                 type="text"
                                 id="profile_desc_input"
                                 value="\${escapeHtml(activeProf.description || '')}"
-                                placeholder="e.g., Core schema discovery and data querying tools"
+                                placeholder="Optional description for this profile"
                                 oninput="updateProfileDescription(this.value)"
                             />
                         </div>
