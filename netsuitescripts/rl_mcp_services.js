@@ -2687,19 +2687,9 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
         const rawLimit = request.limit != null ? Number(request.limit) : 50;
         const limit = !isNaN(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 50;
 
-        const filterExpr = [];
-        if (searchTerm) {
-          filterExpr.push([
-            ["title", "contains", searchTerm],
-            "OR",
-            ["id", "contains", searchTerm],
-          ]);
-        }
-        if (recordType) {
-          if (filterExpr.length > 0) filterExpr.push("AND");
-          filterExpr.push(["recordtype", "is", recordType]);
-        }
-
+        // Note: NetSuite's `savedsearch` search type does not support `contains` on `title` or `id`
+        // (`An nlobjSearchFilter contains an invalid operator, or is not in proper syntax: title`).
+        // Therefore, we fetch saved searches and apply `searchTerm` (and `recordType`) filtering in-memory.
         const colInternalId = search.createColumn({ name: "internalid", sort: search.Sort.DESC });
         const colScriptId = search.createColumn({ name: "id" });
         const colTitle = search.createColumn({ name: "title" });
@@ -2711,7 +2701,6 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
         try {
           listSearchObj = search.create({
             type: "savedsearch",
-            ...(filterExpr.length > 0 ? { filters: filterExpr } : {}),
             columns: [colInternalId, colScriptId, colTitle, colRecordType, colOwner, colIsPublic],
           });
         } catch (createListErr) {
@@ -2720,70 +2709,77 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
           );
         }
 
-        let results = [];
+        const lowerTerm = searchTerm ? searchTerm.toLowerCase() : "";
+        const lowerRecType = recordType ? recordType.toLowerCase() : "";
+        const matchedItems = [];
+        let totalMatched = 0;
+
         try {
-          results = listSearchObj.run().getRange({ start: 0, end: limit }) || [];
-        } catch (runListErr) {
-          // If recordtype filter failed due to internal casing/enum differences, retry with in-memory recordType filtering
-          if (recordType) {
-            try {
-              const fallbackSearch = search.create({
-                type: "savedsearch",
-                ...(searchTerm
-                  ? {
-                      filters: [
-                        ["title", "contains", searchTerm],
-                        "OR",
-                        ["id", "contains", searchTerm],
-                      ],
-                    }
-                  : {}),
-                columns: [colInternalId, colScriptId, colTitle, colRecordType, colOwner, colIsPublic],
-              });
-              const rawFallback = fallbackSearch.run().getRange({ start: 0, end: Math.min(limit * 4, 1000) }) || [];
-              const lowerRecType = recordType.toLowerCase();
-              results = rawFallback
-                .filter((r) => {
-                  const rtVal = String(r.getValue(colRecordType) || "").toLowerCase();
-                  const rtTxt = String(r.getText(colRecordType) || "").toLowerCase();
-                  return rtVal === lowerRecType || rtTxt === lowerRecType || rtVal.includes(lowerRecType) || rtTxt.includes(lowerRecType);
-                })
-                .slice(0, limit);
-            } catch {
-              return makeErrorResponse(
-                `Unable to list saved searches: ${extractFieldsFromErrorMessage(getErrorMessage(runListErr))}`,
-              );
+          const pagedList = listSearchObj.runPaged({ pageSize: 1000 });
+          const maxPagesToScan = lowerTerm || lowerRecType ? Math.min(pagedList.pageRanges.length, 5) : 1;
+
+          for (let pIdx = 0; pIdx < maxPagesToScan; pIdx++) {
+            const page = pagedList.fetch({ index: pagedList.pageRanges[pIdx].index });
+            const pageData = page && Array.isArray(page.data) ? page.data : [];
+
+            for (let rIdx = 0; rIdx < pageData.length; rIdx++) {
+              const r = pageData[rIdx];
+              const internalId = r.getValue(colInternalId) || r.id || null;
+              const sId = r.getValue(colScriptId) || null;
+              const sTitle = r.getValue(colTitle) || null;
+              const recTypeVal = r.getValue(colRecordType) || null;
+              const recTypeText = r.getText(colRecordType) || null;
+              const ownerText = r.getText(colOwner) || r.getValue(colOwner) || null;
+              const pubVal = r.getValue(colIsPublic);
+              const isPub = pubVal === true || pubVal === "T";
+
+              if (lowerRecType) {
+                const rtValLower = String(recTypeVal || "").toLowerCase();
+                const rtTxtLower = String(recTypeText || "").toLowerCase();
+                if (
+                  rtValLower !== lowerRecType &&
+                  rtTxtLower !== lowerRecType &&
+                  !rtValLower.includes(lowerRecType) &&
+                  !rtTxtLower.includes(lowerRecType)
+                ) {
+                  continue;
+                }
+              }
+
+              if (lowerTerm) {
+                const matchId = sId ? String(sId).toLowerCase().includes(lowerTerm) : false;
+                const matchInternal = internalId != null ? String(internalId).toLowerCase().includes(lowerTerm) : false;
+                const matchTitle = sTitle ? String(sTitle).toLowerCase().includes(lowerTerm) : false;
+                const matchType =
+                  (recTypeVal && String(recTypeVal).toLowerCase().includes(lowerTerm)) ||
+                  (recTypeText && String(recTypeText).toLowerCase().includes(lowerTerm));
+                if (!matchId && !matchInternal && !matchTitle && !matchType) {
+                  continue;
+                }
+              }
+
+              totalMatched++;
+              if (matchedItems.length < limit) {
+                matchedItems.push({
+                  ...(internalId != null ? { savedSearchId: internalId } : {}),
+                  scriptId: sId,
+                  title: sTitle,
+                  recordType: recTypeVal,
+                  ...(recTypeText && recTypeText !== recTypeVal ? { recordTypeLabel: recTypeText } : {}),
+                  isPublic: isPub,
+                  ...(ownerText ? { owner: ownerText } : {}),
+                  ...(internalId != null
+                    ? { searchResultsUrl: `/app/common/search/searchresults.nl?searchid=${internalId}` }
+                    : {}),
+                });
+              }
             }
-          } else {
-            return makeErrorResponse(
-              `Unable to list saved searches: ${extractFieldsFromErrorMessage(getErrorMessage(runListErr))}`,
-            );
           }
+        } catch (runListErr) {
+          return makeErrorResponse(
+            `Unable to list saved searches: ${extractFieldsFromErrorMessage(getErrorMessage(runListErr))}`,
+          );
         }
-
-        const savedSearches = results.map((r) => {
-          const internalId = r.getValue(colInternalId) || r.id || null;
-          const sId = r.getValue(colScriptId) || null;
-          const sTitle = r.getValue(colTitle) || null;
-          const recTypeVal = r.getValue(colRecordType) || null;
-          const recTypeText = r.getText(colRecordType) || null;
-          const ownerText = r.getText(colOwner) || r.getValue(colOwner) || null;
-          const pubVal = r.getValue(colIsPublic);
-          const isPub = pubVal === true || pubVal === "T";
-
-          return {
-            ...(internalId != null ? { savedSearchId: internalId } : {}),
-            scriptId: sId,
-            title: sTitle,
-            recordType: recTypeVal,
-            ...(recTypeText && recTypeText !== recTypeVal ? { recordTypeLabel: recTypeText } : {}),
-            isPublic: isPub,
-            ...(ownerText ? { owner: ownerText } : {}),
-            ...(internalId != null
-              ? { searchResultsUrl: `/app/common/search/searchresults.nl?searchid=${internalId}` }
-              : {}),
-          };
-        });
 
         const timeElapsedMS = timer.elapsed;
         const governanceUsed = startGovernance - script.getRemainingUsage();
@@ -2793,8 +2789,9 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
           mode: "list",
           ...(searchTerm ? { searchTerm: searchTerm } : {}),
           ...(recordType ? { recordType: recordType } : {}),
-          count: savedSearches.length,
-          savedSearches: savedSearches,
+          totalMatchingCount: totalMatched,
+          count: matchedItems.length,
+          savedSearches: matchedItems,
           timeElapsedMS: timeElapsedMS,
           governanceUsed: governanceUsed,
         };
@@ -3161,6 +3158,31 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
   };
 
   /**
+   * Post-processes an array of normalized join hops so that if an outer hop has no explicit `target` or `source`
+   * and the immediately following hop is a transaction-specific join field (`transactionlines`, `accountingimpact`),
+   * the outer hop's `target` is inferred automatically (e.g., `target: "transaction"`).
+   *
+   * @param {Array<{ fieldId: string, source: string|null, target: string|null }>} hops
+   * @returns {Array<{ fieldId: string, source: string|null, target: string|null }>}
+   */
+  function inferOuterHopTargetsFromChildHops(hops) {
+    if (!Array.isArray(hops) || hops.length < 2) return hops;
+    for (let i = 0; i < hops.length - 1; i++) {
+      const curr = hops[i];
+      const next = hops[i + 1];
+      if (!curr.source && !curr.target && next && typeof next.fieldId === "string") {
+        const nextFieldLower = next.fieldId.toLowerCase();
+        if (nextFieldLower === "transactionlines") {
+          curr.target = "transaction";
+        } else if (nextFieldLower === "accountingimpact") {
+          curr.target = "transactionline";
+        }
+      }
+    }
+    return hops;
+  }
+
+  /**
    * Normalizes a join specification (string dot-path, single join object, or array of join hops)
    * into an array of canonical join hop descriptors: [{ fieldId, source?, target? }, ...]
    * ordered from outermost (root record) to innermost hop.
@@ -3178,7 +3200,7 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
         .split(".")
         .map((p) => p.trim())
         .filter(Boolean);
-      return parts.map((fieldId) => {
+      const stringHops = parts.map((fieldId) => {
         const lower = fieldId.toLowerCase();
         const defaultTargets = DEFAULT_POLYMORPHIC_JOIN_TARGETS[lower];
         return {
@@ -3187,6 +3209,7 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
           target: defaultTargets && defaultTargets.length > 0 ? defaultTargets[0] : null,
         };
       });
+      return inferOuterHopTargetsFromChildHops(stringHops);
     }
 
     if (Array.isArray(rawJoin)) {
@@ -3197,7 +3220,7 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
           hops.push(subHops[j]);
         }
       }
-      return hops;
+      return inferOuterHopTargetsFromChildHops(hops);
     }
 
     if (typeof rawJoin === "object") {
@@ -3255,7 +3278,7 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
       };
 
       if (rawJoin.join) {
-        return [currentHop].concat(normalizeDatasetJoinHops(rawJoin.join));
+        return inferOuterHopTargetsFromChildHops([currentHop].concat(normalizeDatasetJoinHops(rawJoin.join)));
       }
       return [currentHop];
     }
@@ -3288,14 +3311,15 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
    *
    * @param {Array<{ fieldId: string, source: string|null, target: string|null }>} hops
    * @param {Object} joinCache
+   * @param {boolean} [stripOuterTargets=false]
    * @returns {Object|null}
    */
-  function buildDatasetJoinFromHops(hops, joinCache) {
+  function buildDatasetJoinFromHops(hops, joinCache, stripOuterTargets) {
     if (!Array.isArray(hops) || hops.length === 0) return null;
 
     const buildRecursive = (index) => {
       const slice = hops.slice(index);
-      const cacheKey = JSON.stringify(slice);
+      const cacheKey = `${stripOuterTargets ? "STRIP:" : "FULL:"}${JSON.stringify(slice)}`;
       if (joinCache[cacheKey]) {
         return joinCache[cacheKey];
       }
@@ -3309,7 +3333,7 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
       if (hop.source) {
         joinOpts.source = hop.source;
       }
-      if (hop.target) {
+      if (hop.target && !(stripOuterTargets && childJoin)) {
         joinOpts.target = hop.target;
       }
       if (childJoin) {
@@ -3325,7 +3349,86 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
   }
 
   /**
+   * Rebuilds a `dataset.Dataset` object with `stripOuterTargets: true` on all column and condition joins.
+   * Used when `N/dataset.save()` throws `"Invalid identifier 'field^target', only alphanumeric and underscore characters are allowed"`
+   * on a multi-hop join whose outer hop included `target`.
+   *
+   * @param {Object} sourceDatasetObj
+   * @param {string} effectiveType
+   * @returns {Object}
+   */
+  function rebuildDatasetWithoutOuterHopTargets(sourceDatasetObj, effectiveType) {
+    const strippedJoinCache = {};
+    const strippedColMap = {};
+
+    const cloneColWithStrippedJoin = (col) => {
+      if (!col) return null;
+      const hops = extractHopsFromDatasetJoin(col.join || null);
+      const sig = getDatasetColumnSignature(col.fieldId || "", hops, col.formula || "", col.type || "");
+      if (strippedColMap[sig]) {
+        return strippedColMap[sig];
+      }
+      const colOpts = {};
+      if (col.alias) colOpts.alias = col.alias;
+      if (col.label) colOpts.label = col.label;
+      if (col.id != null) colOpts.id = col.id;
+      if (col.formula) {
+        colOpts.formula = col.formula;
+        if (col.type) colOpts.type = col.type;
+      } else if (col.fieldId) {
+        colOpts.fieldId = col.fieldId;
+        if (hops.length > 0) {
+          colOpts.join = buildDatasetJoinFromHops(hops, strippedJoinCache, true);
+        }
+      }
+      const cloned = dataset.createColumn(colOpts);
+      strippedColMap[sig] = cloned;
+      return cloned;
+    };
+
+    const dsCols = Array.isArray(sourceDatasetObj.columns) ? sourceDatasetObj.columns : [];
+    const newCols = dsCols.map((c) => cloneColWithStrippedJoin(c)).filter(Boolean);
+
+    const cloneCondWithStrippedJoin = (cond) => {
+      if (!cond) return null;
+      if (Array.isArray(cond.children) && cond.children.length > 0) {
+        return dataset.createCondition({
+          operator: cond.operator || "AND",
+          children: cond.children.map((ch) => cloneCondWithStrippedJoin(ch)).filter(Boolean),
+        });
+      }
+      const clonedCol = cloneColWithStrippedJoin(cond.column);
+      const condOpts = {
+        column: clonedCol,
+        operator: cond.operator,
+      };
+      if (
+        cond.values !== undefined &&
+        cond.values !== null &&
+        !(Array.isArray(cond.values) && cond.values.length === 0)
+      ) {
+        condOpts.values = cond.values;
+      }
+      if (typeof cond.caseSensitive === "boolean") {
+        condOpts.caseSensitive = cond.caseSensitive;
+      }
+      return dataset.createCondition(condOpts);
+    };
+
+    const newCond = sourceDatasetObj.condition ? cloneCondWithStrippedJoin(sourceDatasetObj.condition) : null;
+
+    return dataset.create({
+      type: effectiveType,
+      columns: newCols,
+      ...(newCond ? { condition: newCond } : {}),
+    });
+  }
+
+  /**
    * Serializes an existing `dataset.Join` object into an array of `{ fieldId, source, target }` hops.
+   * Also automatically infers `target` on outer hops when followed by transaction-specific child hops
+   * (`transactionlines`, `accountingimpact`) or known polymorphic field defaults, so datasets loaded via
+   * `dataset.load` (where NetSuite may omit `target` on outer hops) still execute cleanly via `N/query`.
    *
    * @param {Object|null} joinObj
    * @returns {Array<{ fieldId: string, source: string|null, target: string|null }>}
@@ -3336,14 +3439,154 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
     let guard = 0;
     while (curr && typeof curr === "object" && curr.fieldId && guard < 15) {
       guard++;
+      const fieldId = String(curr.fieldId);
+      const source = curr.source ? String(curr.source) : null;
+      let target = curr.target ? String(curr.target) : null;
+      if (!source && !target) {
+        const defaultTargets = DEFAULT_POLYMORPHIC_JOIN_TARGETS[fieldId.toLowerCase()];
+        if (defaultTargets && defaultTargets.length > 0) {
+          target = defaultTargets[0];
+        }
+      }
       hops.push({
-        fieldId: String(curr.fieldId),
-        source: curr.source ? String(curr.source) : null,
-        target: curr.target ? String(curr.target) : null,
+        fieldId: fieldId,
+        source: source,
+        target: target,
       });
       curr = curr.join || null;
     }
-    return hops;
+    return inferOuterHopTargetsFromChildHops(hops);
+  }
+
+  /**
+   * Checks whether a column label string is valid (non-empty and not NetSuite's `"<Missing Translation>"` placeholder).
+   *
+   * @param {*} labelVal
+   * @returns {boolean}
+   */
+  function isValidDatasetColumnLabel(labelVal) {
+    if (typeof labelVal !== "string") return false;
+    const trimmed = labelVal.trim();
+    if (!trimmed) return false;
+    if (/^<missing translation>$/i.test(trimmed)) return false;
+    return true;
+  }
+
+  /**
+   * Reconstructs fresh `dataset.Column` and `dataset.Condition` instances from a loaded `dataset.Dataset` object
+   * using fresh `dataset.createJoin`, `dataset.createColumn`, and `dataset.createCondition` calls.
+   * Why: Passing `existingDataset.columns` or `existingDataset.condition` (from `dataset.load`) directly into
+   * a new `dataset.create(...)` object causes NetSuite's `Dataset.save()` to lose column label references
+   * (turning labels into `"<Missing Translation>"`) or fail on multi-hop joins.
+   *
+   * @param {Object} loadedDataset
+   * @param {Object} joinCache
+   * @param {Object} columnBySignature
+   * @param {Object} columnByAlias
+   * @param {Object} usedAliases
+   * @returns {{ columns: Array<Object>, condition: Object|null }}
+   */
+  function cloneLoadedDatasetComponents(
+    loadedDataset,
+    joinCache,
+    columnBySignature,
+    columnByAlias,
+    usedAliases,
+  ) {
+    const clonedColumns = [];
+    const rawCols = loadedDataset && Array.isArray(loadedDataset.columns) ? loadedDataset.columns : [];
+
+    const cloneSingleColumn = (exCol, idx, isConditionOnly) => {
+      if (!exCol || typeof exCol !== "object") return null;
+      const fieldId = exCol.fieldId ? String(exCol.fieldId).trim() : "";
+      const formula = exCol.formula ? String(exCol.formula).trim() : "";
+      const formulaType = exCol.type ? resolveDatasetFormulaType(String(exCol.type)) : "";
+      const exHops = exCol.join ? extractHopsFromDatasetJoin(exCol.join) : [];
+
+      const sig = getDatasetColumnSignature(fieldId, exHops, formula, formulaType);
+      if (isConditionOnly && columnBySignature[sig]) {
+        return columnBySignature[sig];
+      }
+
+      const rawAlias = exCol.alias ? String(exCol.alias).trim() : null;
+      const alias = allocateDatasetColumnAlias(
+        rawAlias,
+        isConditionOnly && fieldId ? `cond_${fieldId}` : fieldId || null,
+        exHops,
+        idx,
+        usedAliases,
+      );
+
+      const colOpts = {
+        alias: alias,
+      };
+      if (isValidDatasetColumnLabel(exCol.label)) {
+        colOpts.label = String(exCol.label).trim();
+      }
+      if (formula) {
+        colOpts.formula = formula;
+        if (formulaType) colOpts.type = formulaType;
+      } else if (fieldId) {
+        colOpts.fieldId = fieldId;
+        if (exHops.length > 0) {
+          colOpts.join = buildDatasetJoinFromHops(exHops, joinCache, false);
+        }
+      } else {
+        return null;
+      }
+
+      const created = dataset.createColumn(colOpts);
+      if (!columnBySignature[sig]) {
+        columnBySignature[sig] = created;
+      }
+      columnByAlias[alias] = created;
+      return created;
+    };
+
+    for (let i = 0; i < rawCols.length; i++) {
+      const clonedCol = cloneSingleColumn(rawCols[i], i, false);
+      if (clonedCol) {
+        clonedColumns.push(clonedCol);
+      }
+    }
+
+    const cloneConditionTree = (exCond) => {
+      if (!exCond || typeof exCond !== "object") return null;
+      if (Array.isArray(exCond.children) && exCond.children.length > 0) {
+        const childClones = exCond.children.map((ch) => cloneConditionTree(ch)).filter(Boolean);
+        if (childClones.length === 0) return null;
+        return dataset.createCondition({
+          operator: exCond.operator ? String(exCond.operator).toUpperCase() : "AND",
+          children: childClones,
+        });
+      }
+      if (!exCond.column) return null;
+      const condCol = cloneSingleColumn(exCond.column, Object.keys(usedAliases).length, true);
+      if (!condCol) return null;
+      const condOpts = {
+        column: condCol,
+        operator: exCond.operator,
+      };
+      if (
+        exCond.values !== undefined &&
+        exCond.values !== null &&
+        !(Array.isArray(exCond.values) && exCond.values.length === 0)
+      ) {
+        condOpts.values = exCond.values;
+      }
+      if (typeof exCond.caseSensitive === "boolean") {
+        condOpts.caseSensitive = exCond.caseSensitive;
+      }
+      return dataset.createCondition(condOpts);
+    };
+
+    const clonedCondition =
+      loadedDataset && loadedDataset.condition ? cloneConditionTree(loadedDataset.condition) : null;
+
+    return {
+      columns: clonedColumns,
+      condition: clonedCondition,
+    };
   }
 
   /**
@@ -3841,10 +4084,27 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
   }
 
   /**
+   * Checks whether a dataset description value is a valid user-authored string
+   * (non-empty and not a Rhino Java Lambda reference like `com.netsuite.analytics...$$Lambda...`).
+   *
+   * @param {*} val
+   * @returns {boolean}
+   */
+  function isRealDatasetDescription(val) {
+    if (typeof val !== "string") return false;
+    const trimmed = val.trim();
+    if (!trimmed) return false;
+    if (trimmed.includes("$$Lambda") || /^com\.netsuite\./i.test(trimmed)) return false;
+    return true;
+  }
+
+  /**
    * Looks up the saved `name` and `description` of an existing dataset by its scriptId
-   * using `query.load({ id })`, `dataset.describe({ id })`, and `dataset.list()`.
+   * using `dataset.list()`, `query.load({ id })`, and `dataset.describe({ id })`.
    * Note: In NetSuite's `N/dataset` module, `dataset.load({ id }).name` returns the literal placeholder
-   * `"SuiteScript dataset"` rather than the dataset's actual saved name in SuiteAnalytics Workbook.
+   * `"SuiteScript dataset"` and `dataset.describe({ id }).description` / `dataset.load({ id }).description`
+   * can return a Rhino Java Lambda string (`com.netsuite.analytics...$$Lambda...`), whereas `dataset.list()`
+   * returns the true saved `name` and `description` strings.
    *
    * @param {string} scriptId
    * @returns {{ name: string|null, description: string|null }}
@@ -3856,63 +4116,69 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
     let foundDescription = null;
 
     const isRealDatasetName = (val) =>
-      typeof val === "string" && val.trim() !== "" && val.trim() !== "SuiteScript dataset";
+      typeof val === "string" &&
+      val.trim() !== "" &&
+      val.trim() !== "SuiteScript dataset" &&
+      !val.includes("$$Lambda") &&
+      !/^com\.netsuite\./i.test(val.trim());
 
-    // 1. Check query.load({ id }).name
+    // 1. Check dataset.list() first (most reliable for both name and description)
     try {
-      if (query && typeof query.load === "function") {
-        const qLoaded = query.load({ id: scriptId });
-        if (qLoaded && isRealDatasetName(qLoaded.name)) {
-          foundName = String(qLoaded.name).trim();
+      if (typeof dataset.list === "function") {
+        const list = dataset.list();
+        if (Array.isArray(list)) {
+          for (let i = 0; i < list.length; i++) {
+            const item = list[i];
+            if (!item || typeof item !== "object") continue;
+            const itemId = item.id != null ? String(item.id).trim().toLowerCase() : "";
+            const itemScriptId = item.scriptId != null ? String(item.scriptId).trim().toLowerCase() : "";
+            if (itemId === lowerTarget || itemScriptId === lowerTarget) {
+              if (isRealDatasetName(item.name)) {
+                foundName = String(item.name).trim();
+              }
+              if (isRealDatasetDescription(item.description)) {
+                foundDescription = String(item.description);
+              }
+              break;
+            }
+          }
         }
       }
     } catch {
-      // Ignore query.load lookup errors
+      // Ignore dataset.list lookup errors
     }
 
-    // 2. Check dataset.describe({ id })
-    try {
-      if (typeof dataset.describe === "function") {
-        const desc = dataset.describe({ id: scriptId });
-        const descObj = Array.isArray(desc) ? desc[0] : desc;
-        if (descObj && typeof descObj === "object") {
-          if (!foundName && isRealDatasetName(descObj.name)) {
-            foundName = String(descObj.name).trim();
-          }
-          if (descObj.description != null && String(descObj.description) !== "") {
-            foundDescription = String(descObj.description);
+    // 2. Fallback: Check query.load({ id }).name
+    if (!foundName) {
+      try {
+        if (query && typeof query.load === "function") {
+          const qLoaded = query.load({ id: scriptId });
+          if (qLoaded && isRealDatasetName(qLoaded.name)) {
+            foundName = String(qLoaded.name).trim();
           }
         }
+      } catch {
+        // Ignore query.load lookup errors
       }
-    } catch {
-      // Ignore dataset.describe lookup errors
     }
 
-    // 3. Check dataset.list()
+    // 3. Fallback: Check dataset.describe({ id })
     if (!foundName || foundDescription === null) {
       try {
-        if (typeof dataset.list === "function") {
-          const list = dataset.list();
-          if (Array.isArray(list)) {
-            for (let i = 0; i < list.length; i++) {
-              const item = list[i];
-              if (!item || typeof item !== "object") continue;
-              const itemId = item.id != null ? String(item.id).trim().toLowerCase() : "";
-              const itemScriptId = item.scriptId != null ? String(item.scriptId).trim().toLowerCase() : "";
-              if (itemId === lowerTarget || itemScriptId === lowerTarget) {
-                if (!foundName && isRealDatasetName(item.name)) {
-                  foundName = String(item.name).trim();
-                }
-                if (foundDescription === null && item.description != null) {
-                  foundDescription = String(item.description);
-                }
-                break;
-              }
+        if (typeof dataset.describe === "function") {
+          const desc = dataset.describe({ id: scriptId });
+          const descObj = Array.isArray(desc) ? desc[0] : desc;
+          if (descObj && typeof descObj === "object") {
+            if (!foundName && isRealDatasetName(descObj.name)) {
+              foundName = String(descObj.name).trim();
+            }
+            if (foundDescription === null && isRealDatasetDescription(descObj.description)) {
+              foundDescription = String(descObj.description);
             }
           }
         }
       } catch {
-        // Ignore dataset.list lookup errors
+        // Ignore dataset.describe lookup errors
       }
     }
 
@@ -4283,7 +4549,25 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
         );
       }
 
-      // 2. Construct N/dataset columns (or seed from existingDataset when omitted on overwrite)
+      // 2. Construct N/dataset columns (or clone fresh columns from existingDataset when omitted on overwrite)
+      // Note: When `existingDataset` is loaded via `dataset.load({ id })`, its `.columns` and `.condition` objects
+      // contain internal label translation handles that become `"<Missing Translation>"` if passed directly into a new
+      // `dataset.create(...)` and `.save(...)` call! Therefore, whenever `columns` or `condition` are inherited from
+      // `existingDataset`, we clone them into fresh `dataset.createColumn` / `dataset.createCondition` instances.
+      let clonedExistingComponents = null;
+      const getClonedExistingComponents = () => {
+        if (!clonedExistingComponents && existingDataset) {
+          clonedExistingComponents = cloneLoadedDatasetComponents(
+            existingDataset,
+            joinCache,
+            columnBySignature,
+            columnByAlias,
+            usedAliases,
+          );
+        }
+        return clonedExistingComponents;
+      };
+
       const createdColumns = [];
       if (hasExplicitColumns) {
         for (let i = 0; i < request.columns.length; i++) {
@@ -4346,7 +4630,7 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
             alias: alias,
           };
 
-          if (typeof colDef.label === "string" && colDef.label.trim()) {
+          if (isValidDatasetColumnLabel(colDef.label)) {
             colOptions.label = colDef.label.trim();
           }
           if (typeof colDef.id === "number" && !isNaN(colDef.id)) {
@@ -4393,18 +4677,11 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
             );
           }
         }
-      } else if (existingDataset && Array.isArray(existingDataset.columns)) {
-        for (let i = 0; i < existingDataset.columns.length; i++) {
-          const exCol = existingDataset.columns[i];
-          createdColumns.push(exCol);
-          const exHops = exCol.join ? extractHopsFromDatasetJoin(exCol.join) : [];
-          const sig = getDatasetColumnSignature(exCol.fieldId || "", exHops, exCol.formula || "", exCol.type || "");
-          if (!columnBySignature[sig]) {
-            columnBySignature[sig] = exCol;
-          }
-          if (exCol.alias) {
-            columnByAlias[exCol.alias] = exCol;
-            usedAliases[exCol.alias] = 1;
+      } else if (existingDataset) {
+        const cloned = getClonedExistingComponents();
+        if (cloned && Array.isArray(cloned.columns)) {
+          for (let i = 0; i < cloned.columns.length; i++) {
+            createdColumns.push(cloned.columns[i]);
           }
         }
       }
@@ -4466,7 +4743,8 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
             children: leafConditions,
           });
         } else if (existingDataset && existingDataset.condition && !shouldClearCondition) {
-          return existingDataset.condition;
+          const cloned = getClonedExistingComponents();
+          return cloned && cloned.condition ? cloned.condition : null;
         }
         return null;
       };
@@ -4490,21 +4768,22 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
         existingDataset.name &&
         String(existingDataset.name) !== "SuiteScript dataset"
           ? String(existingDataset.name)
-          : existingDataset && existingDataset.name
-            ? String(existingDataset.name)
-            : null);
+          : null);
       const loadedDatasetDescription =
         existingMeta.description !== null
           ? existingMeta.description
-          : existingDataset && existingDataset.description != null && String(existingDataset.description) !== ""
+          : existingDataset && isRealDatasetDescription(existingDataset.description)
             ? String(existingDataset.description)
             : null;
 
-      const resolvedName = datasetName || loadedDatasetName;
-      const resolvedDescription =
-        datasetDescription !== undefined ? datasetDescription : loadedDatasetDescription;
       const resolvedScriptId =
         normalizedScriptId || (existingDataset && existingDataset.id ? String(existingDataset.id) : null);
+      const resolvedName =
+        datasetName ||
+        loadedDatasetName ||
+        (!isDryRun && resolvedScriptId ? resolvedScriptId : null);
+      const resolvedDescription =
+        datasetDescription !== undefined ? datasetDescription : loadedDatasetDescription;
 
       if (!isDryRun && !resolvedName) {
         return makeErrorResponse('Missing required "name" (or "title") when saving a dataset (dryRun: false).');
@@ -4513,6 +4792,11 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
       const isUnmodifiedExisting =
         existingLoaded && !hasExplicitColumns && !hasExplicitFilters && !hasExplicitCondition;
 
+      // IMPORTANT: Per Oracle's Workbook API documentation (article_163353416302.html), `name`, `description`, and `id`
+      // on `dataset.create(options)` are ONLY for Dataset Builder Plug-ins! Passing them to `dataset.create(...)`
+      // or calling `.save(...)` on an instance that has already executed `.runPaged()` / `.run()` causes NetSuite
+      // to save the dataset with the hardcoded name "SuiteScript dataset". Always pass only `{ type, columns, condition }`
+      // to `dataset.create(...)` and pass `{ name, description, id }` exclusively to `.save(...)` on a fresh instance.
       const createFreshDatasetInstance = (conditionToUse) => {
         const createOptions = {
           type: effectiveType,
@@ -4520,15 +4804,6 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
         };
         if (conditionToUse) {
           createOptions.condition = conditionToUse;
-        }
-        if (resolvedName) {
-          createOptions.name = resolvedName;
-        }
-        if (resolvedDescription !== null && resolvedDescription !== undefined) {
-          createOptions.description = resolvedDescription;
-        }
-        if (resolvedScriptId && !/^\d+$/.test(resolvedScriptId)) {
-          createOptions.id = resolvedScriptId;
         }
         return dataset.create(createOptions);
       };
@@ -4554,11 +4829,12 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
       const columnMeta = activeColumns.map((col, idx) => {
         const joinHops = col.join ? extractHopsFromDatasetJoin(col.join) : [];
         const joinPath = formatDatasetJoinPath(joinHops);
+        const cleanLabel = isValidDatasetColumnLabel(col.label) ? String(col.label).trim() : null;
         const metaItem = {
           key: "",
           fieldId: col.fieldId || null,
           alias: col.alias || null,
-          label: col.label || null,
+          label: cleanLabel,
           ...(joinHops.length > 0 ? { join: joinHops, joinPath: joinPath } : {}),
           ...(col.formula ? { formula: col.formula, type: col.type || null } : {}),
         };
@@ -4624,35 +4900,42 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
         return { count: count, items: items };
       };
 
+      // 5. Execute the dataset to validate and collect preview rows + totalMatchCount
+      // IMPORTANT: When `dryRun: false` (saving), NEVER call `datasetObj.runPaged()` or `datasetObj.run()`
+      // before calling `.save()`! Calling `.runPaged()` / `.run()` on an unsaved `dataset.Column[]` / `dataset.Condition`
+      // object graph mutates the shared `dataset.Column` and `dataset.Condition` instances in-place inside NetSuite's
+      // N/dataset runtime, stamping the internal transient name `"SuiteScript dataset"` onto the saved definition!
+      // Instead, when `!isDryRun`, we always execute the preview against the `N/query` mirror (`buildMirrorQueryFromDataset`),
+      // which leaves the `N/dataset` objects 100% untouched for `.save()`.
       let rawResultItems = [];
       let previewError = null;
 
-      // 5a. First attempt: execute via datasetObj.runPaged() / datasetObj.run()
-      try {
-        const dsExec = executeRunnableForPreview(datasetObj);
-        totalMatchCount = dsExec.count;
-        rawResultItems = dsExec.items;
-      } catch (dsErr) {
-        const retryDateMode = detectDateRetryModeFromError(dsErr);
-        if (retryDateMode && (hasExplicitFilters || hasExplicitCondition)) {
-          try {
-            finalCondition = buildRequestedCondition(retryDateMode);
-            datasetObj = instantiateDatasetObject(finalCondition);
-            const retryExec = executeRunnableForPreview(datasetObj);
-            totalMatchCount = retryExec.count;
-            rawResultItems = retryExec.items;
-          } catch (retryErr) {
-            previewError = retryErr;
+      if (isDryRun) {
+        // 5a. Dry-run: try datasetObj.runPaged() / datasetObj.run() first
+        try {
+          const dsExec = executeRunnableForPreview(datasetObj);
+          totalMatchCount = dsExec.count;
+          rawResultItems = dsExec.items;
+        } catch (dsErr) {
+          const retryDateMode = detectDateRetryModeFromError(dsErr);
+          if (retryDateMode && (hasExplicitFilters || hasExplicitCondition)) {
+            try {
+              finalCondition = buildRequestedCondition(retryDateMode);
+              datasetObj = instantiateDatasetObject(finalCondition);
+              const retryExec = executeRunnableForPreview(datasetObj);
+              totalMatchCount = retryExec.count;
+              rawResultItems = retryExec.items;
+            } catch (retryErr) {
+              previewError = retryErr;
+            }
+          } else {
+            previewError = dsErr;
           }
-        } else {
-          previewError = dsErr;
         }
       }
 
-      // 5b. Automatic N/query fallback: NetSuite's `datasetObj.run()` has a known SuiteScript 2.1 platform bug
-      // when executing multi-hop `dataset.Join` chains (`An unexpected SuiteScript error has occurred` or
-      // `Invalid identifier 'field^target'`), whereas `N/query` executes the exact same multi-hop joins cleanly.
-      if (previewError) {
+      // 5b. Execute via N/query mirror when saving (`!isDryRun`) or as automatic fallback when `datasetObj.run()` fails
+      if (!isDryRun || previewError) {
         try {
           let mirrorQuery = buildMirrorQueryFromDataset(datasetObj);
           try {
@@ -4729,83 +5012,98 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
           saveOptionsWithId.id = resolvedScriptId;
         }
 
+        // Helper that saves a fresh, un-executed dataset instance, and if N/dataset.save() throws
+        // `"Invalid identifier 'field^target', only alphanumeric and underscore characters are allowed"`
+        // on a multi-hop join whose outer hop included `target`, automatically retries without outer-hop `target`s.
+        const saveFreshDatasetWithOuterTargetFallback = (baseDatasetObj, saveOpts) => {
+          try {
+            return baseDatasetObj.save(saveOpts);
+          } catch (firstSaveErr) {
+            const errMsg = extractFieldsFromErrorMessage(getErrorMessage(firstSaveErr));
+            if (/Invalid identifier\s+'[^']+\^[^']+'/i.test(errMsg)) {
+              const strippedDataset = rebuildDatasetWithoutOuterHopTargets(baseDatasetObj, effectiveType);
+              try {
+                return strippedDataset.save(saveOpts);
+              } catch (strippedSaveErr) {
+                const strippedMsg = extractFieldsFromErrorMessage(getErrorMessage(strippedSaveErr));
+                if (/Record Join\s+'[^']+'\s+for record\s+'[^']+'\s+was not found/i.test(strippedMsg)) {
+                  throw new Error(
+                    `NetSuite N/dataset platform limitation: NetSuite's Dataset.save() API cannot persist a 2+ hop join that traverses through a polymorphic custom field (${errMsg}; without outer target: ${strippedMsg}). Workaround: use a 1-hop join on the polymorphic field (e.g. join: { fieldId: "...", target: "transaction" }) or save the multi-hop dataset in the SuiteAnalytics Workbook UI.`,
+                  );
+                }
+                throw strippedSaveErr;
+              }
+            }
+            throw firstSaveErr;
+          }
+        };
+
         if (existingLoaded && existingDataset) {
           // Updating an existing dataset:
-          // IMPORTANT: Never call `.save()` WITHOUT `id` when updating an existing dataset! Calling `.save({ name, description })`
-          // without `id` causes NetSuite to insert a brand-new duplicate dataset with an auto-generated ID (`custdataset65`)
-          // instead of updating `resolvedScriptId`.
-          // Stage 1: Try saving in-place on `existingDataset` WITH `id: resolvedScriptId`.
-          const originalColumns = existingDataset.columns;
-          const originalCondition = existingDataset.condition;
-          let updatedInPlace = false;
+          // In NetSuite's N/dataset module, `Dataset.save()` is insert-only (it throws "Unable to save the dataset"
+          // when `id` already exists, or creates a duplicate `custdataset<N>` with name "SuiteScript dataset" if called
+          // on an already-loaded/executed instance). To overwrite an existing dataset cleanly and preserve its display `name`,
+          // we clone the original components BEFORE deleting via `query.delete({ id })`, and immediately save a fresh,
+          // un-executed `dataset.create({ type, columns, condition })` instance with `{ name, description, id }`.
+          const backupJoinCache = {};
+          const backupColBySig = {};
+          const backupColByAlias = {};
+          const backupUsedAliases = {};
+          const backupComponents = cloneLoadedDatasetComponents(
+            existingDataset,
+            backupJoinCache,
+            backupColBySig,
+            backupColByAlias,
+            backupUsedAliases,
+          );
 
           try {
-            existingDataset.columns = createdColumns;
-            existingDataset.condition = finalCondition || null;
-
-            const saveResult = existingDataset.save(saveOptionsWithId);
-            const returnedId =
-              saveResult && saveResult.id != null ? String(saveResult.id).trim() : resolvedScriptId;
-            if (!resolvedScriptId || returnedId.toLowerCase() === resolvedScriptId.toLowerCase()) {
-              updatedInPlace = true;
-              savedDatasetId = returnedId || resolvedScriptId;
-            }
-          } catch {
-            updatedInPlace = false;
+            query.delete({ id: resolvedScriptId });
+          } catch (delErr) {
+            return makeErrorResponse(
+              `Dataset preview succeeded, but updating existing dataset "${resolvedScriptId}" failed (query.delete({ id: "${resolvedScriptId}" }) failed: ${extractFieldsFromErrorMessage(getErrorMessage(delErr))}). If this dataset is currently linked to a Workbook, update it in the SuiteAnalytics Workbook UI or save under a new scriptId.`,
+            );
           }
 
-          // Stage 2: In NetSuite's N/dataset module, `Dataset.save()` is insert-only (it throws "Unable to save the dataset"
-          // when `id` already exists). To overwrite an existing dataset with the same `scriptId`, we delete the existing
-          // dataset via `query.delete({ id })` and immediately save the updated definition under the same `scriptId`.
-          if (!updatedInPlace) {
-            try {
-              query.delete({ id: resolvedScriptId });
-            } catch (delErr) {
-              return makeErrorResponse(
-                `Dataset preview succeeded, but updating existing dataset "${resolvedScriptId}" failed (N/dataset does not support in-place overwrite and query.delete({ id: "${resolvedScriptId}" }) failed: ${extractFieldsFromErrorMessage(getErrorMessage(delErr))}). If this dataset is currently linked to a Workbook, update it in the SuiteAnalytics Workbook UI or save under a new scriptId.`,
-              );
-            }
-
-            try {
-              const freshToSave = createFreshDatasetInstance(finalCondition);
-              const saveResult = freshToSave.save(saveOptionsWithId);
-              savedDatasetId =
-                saveResult && saveResult.id != null
-                  ? String(saveResult.id)
-                  : resolvedScriptId;
-            } catch (recreateErr) {
-              // Recovery safeguard: attempt to restore the original dataset definition if saving the replacement failed
-              try {
-                const restoreDataset = dataset.create({
-                  type: effectiveType,
-                  columns: originalColumns,
-                  ...(originalCondition ? { condition: originalCondition } : {}),
-                  name: loadedDatasetName || resolvedName,
-                  ...(loadedDatasetDescription != null ? { description: loadedDatasetDescription } : {}),
-                  id: resolvedScriptId,
-                });
-                restoreDataset.save({
-                  name: loadedDatasetName || resolvedName,
-                  ...(loadedDatasetDescription != null ? { description: loadedDatasetDescription } : {}),
-                  id: resolvedScriptId,
-                });
-              } catch {
-                // Ignore recovery failure
-              }
-
-              return makeErrorResponse(
-                `Deleted existing dataset "${resolvedScriptId}" for overwrite, but saving the replacement dataset failed: ${extractFieldsFromErrorMessage(getErrorMessage(recreateErr))}`,
-              );
-            }
-          }
-        } else {
-          // Creating a new dataset
           try {
-            const saveResult = datasetObj.save(saveOptionsWithId);
+            const freshToSave = createFreshDatasetInstance(finalCondition);
+            const saveResult = saveFreshDatasetWithOuterTargetFallback(freshToSave, saveOptionsWithId);
             savedDatasetId =
               saveResult && saveResult.id != null
                 ? String(saveResult.id)
-                : resolvedScriptId || (datasetObj.id ? String(datasetObj.id) : null);
+                : resolvedScriptId;
+          } catch (recreateErr) {
+            // Recovery safeguard: restore the original dataset definition using fresh cloned components
+            // so original column labels and joins are preserved intact
+            try {
+              const restoreDataset = dataset.create({
+                type: effectiveType,
+                columns: backupComponents.columns,
+                ...(backupComponents.condition ? { condition: backupComponents.condition } : {}),
+              });
+              restoreDataset.save({
+                name: loadedDatasetName || resolvedName,
+                ...(loadedDatasetDescription != null ? { description: loadedDatasetDescription } : {}),
+                id: resolvedScriptId,
+              });
+            } catch {
+              // Ignore recovery failure
+            }
+
+            return makeErrorResponse(
+              `Deleted existing dataset "${resolvedScriptId}" for overwrite, but saving the replacement dataset failed (original dataset was restored): ${extractFieldsFromErrorMessage(getErrorMessage(recreateErr))}`,
+            );
+          }
+        } else {
+          // Creating a new dataset: always call `.save()` on a fresh, un-executed `dataset.create({ type, columns, condition })`
+          // instance so `.runPaged()` / `.run()` does not stamp "SuiteScript dataset" onto the saved definition.
+          try {
+            const freshToSave = createFreshDatasetInstance(finalCondition);
+            const saveResult = saveFreshDatasetWithOuterTargetFallback(freshToSave, saveOptionsWithId);
+            savedDatasetId =
+              saveResult && saveResult.id != null
+                ? String(saveResult.id)
+                : resolvedScriptId || (freshToSave.id ? String(freshToSave.id) : null);
           } catch (saveErr) {
             return makeErrorResponse(
               `Dataset preview succeeded, but saving the dataset failed: ${extractFieldsFromErrorMessage(getErrorMessage(saveErr))}`,
@@ -4988,7 +5286,7 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
       const resolvedDescription =
         existingMeta.description !== null
           ? existingMeta.description
-          : datasetObj.description != null && String(datasetObj.description) !== ""
+          : isRealDatasetDescription(datasetObj.description)
             ? String(datasetObj.description)
             : null;
       const resolvedScriptId =
@@ -5000,11 +5298,12 @@ define(["N/config", "N/dataset", "N/file", "N/format", "N/log", "N/query", "N/re
       const columnMeta = activeColumns.map((col, idx) => {
         const joinHops = col.join ? extractHopsFromDatasetJoin(col.join) : [];
         const joinPath = formatDatasetJoinPath(joinHops);
+        const cleanLabel = isValidDatasetColumnLabel(col.label) ? String(col.label).trim() : null;
         const metaItem = {
           key: "",
           fieldId: col.fieldId || null,
           alias: col.alias || null,
-          label: col.label || null,
+          label: cleanLabel,
           ...(joinHops.length > 0 ? { join: joinHops, joinPath: joinPath } : {}),
           ...(col.formula ? { formula: col.formula, type: col.type || null } : {}),
         };
